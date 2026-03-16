@@ -80,22 +80,15 @@ The code can be found in `benchmark_baselines.py`.
 
 To evaluate caching strategies under realistic workloads, `benchmark_e2e.py` replays multi-turn conversations from the [tucnguyen/ShareGPT](https://huggingface.co/datasets/tucnguyen/ShareChat) dataset through a single Qwen3.5-0.8B layer group with random weights.
 
-> **IMPORTANT:** a number of simplifications is applied in this tests. See `benchmark_e2e.py` for detailed discussion and real-world applicability of these numbers. 
+> **IMPORTANT:** a number of simplifications is applied in this tests. See `benchmark_e2e.py` for detailed discussion and real-world applicability of these numbers.
 
-> **TODO:** these are results over 100 sequences (~500 requests) and 1G cache size. TODO: scale 10 times (should fit kaggle limits)
+![ese_speedup](assets/e2e_time_vs_length.png)
+> Left panel — Prefill time vs context length. Here i have 40 dialog histories and send them in random order preserving in-conversation order. I measure prefill wall time, cache is stored at CPU. In total, there are 852 requests and 3 GB prefix cache budget (5M tokens overall). Right panel — per-request relative speedup.
+
+Speedup is possible because logarithmic checkpoints use ~$O(\log L)$ memory per entry (vs $O(L/B)$ for block), so more conversations fit in the 3 GB budget simultaneously, yielding higher hit rates (80% cache hits vs 10% for block-boundary).
+
+
 > **TODO:** add relative speedup boxplot
+> **TODO:** there seem to be some memory overhead in transformers -- OOM happen much earlier that expected. Study this
 
-```
 
-Strategy               Time (s)  Speedup   Hit rate  GDN saved
-------------------------------------------------------------
-no_cache                   42.4    1.00x                      
-attn_only                  35.1    1.21x                      
-block                      40.0    1.06x      15.0%      18.6%
-block_and_attn             39.6    1.07x      15.0%      18.6%
-log                        33.0    1.28x      57.6%      45.2%
-log_and_attn               31.1    1.36x      54.2%      42.9%
----
-```
-
-> **TODO:** most entries in this dataset have short context lengths (<1K toks for the whole conversation) hence it does not highlight the asymptotic improvements. Filter to larger lengths, and plot acceleration VS length.
