@@ -298,6 +298,7 @@ def prefill_from_checkpoint(
     model: Qwen3_5TextModel,
     input_ids: torch.Tensor,
     store: PrefixCheckpointStore,
+    max_chunk: int = 4096,
 ) -> tuple[torch.Tensor, Qwen3_5DynamicCache]:
     """
         Resume prefill from best checkpoint, computing only the tail tokens.
@@ -350,17 +351,23 @@ def prefill_from_checkpoint(
             cache.key_cache[li] = store.kv_cache_keys[li][:, :, :resume_pos, :].clone()
             cache.value_cache[li] = store.kv_cache_values[li][:, :, :resume_pos, :].clone()
 
-    remaining_ids = input_ids[:, resume_pos:]
-    cache_position = torch.arange(resume_pos, seq_len, device=device)
-
-    with torch.no_grad():
-        output = model(
-            input_ids=remaining_ids,
-            past_key_values=cache,
-            use_cache=True,
-            cache_position=cache_position,
-        )
-    return output.last_hidden_state, output.past_key_values
+    # Process remaining tokens in chunks. HF materializes a full causal
+    # mask when Q_len != K_len: (Q_len × K_len × 4B).  At Q=16K, K=32K
+    # that's ~2GB, enough to OOM.  Chunking keeps the mask small.
+    pos = resume_pos
+    output = None
+    while pos < seq_len:
+        end = min(pos + max_chunk, seq_len)
+        with torch.no_grad():
+            output = model(
+                input_ids=input_ids[:, pos:end],
+                past_key_values=cache,
+                use_cache=True,
+                cache_position=torch.arange(pos, end, device=device),
+            )
+        cache = output.past_key_values
+        pos = end
+    return output.last_hidden_state, cache
 
 
 # ---------------------------------------------------------------------------
