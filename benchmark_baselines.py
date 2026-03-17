@@ -12,7 +12,7 @@ Measures 6 strategies matching the theoretical FLOP plot:
 instead of real reading from cache, since hf does not seem to support this.
 Modifying transformer's cache behavior would involve modifying attention kernel.
 """
-
+import hybrid_logarithmic_cache
 import gc
 import time
 from contextlib import contextmanager
@@ -26,7 +26,7 @@ import hydra
 from omegaconf import DictConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DynamicCache
 
-from checkpoint_cache import (
+from hybrid_logarithmic_cache.checkpoint_cache import (
     apply_patch,
     make_model,
     prefill_baseline,

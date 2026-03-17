@@ -82,7 +82,7 @@ import hydra
 from omegaconf import DictConfig
 from tqdm.auto import tqdm
 
-from checkpoint_cache import (
+from hybrid_logarithmic_cache.checkpoint_cache import (
     apply_patch,
     make_model,
     prefill_baseline,
