@@ -149,6 +149,11 @@ class RecurrentCheckpoint:
     recurrent_states: dict[int, torch.Tensor]  # layer_idx → (B, H, Dk, Dv)
     conv_states: dict[int, torch.Tensor]        # layer_idx → (B, C, K-1)
 
+    def to(self, device):
+        self.recurrent_states = {k: v.to(device) for k, v in self.recurrent_states.items()}
+        self.conv_states = {k: v.to(device) for k, v in self.conv_states.items()}
+        return self
+
 
 @dataclass
 class PrefixCheckpointStore:
@@ -181,6 +186,15 @@ class PrefixCheckpointStore:
         for t in self.kv_cache_values.values():
             total += t.nelement() * t.element_size()
         return total
+
+    def to(self, device):
+        if self.prefix_tokens is not None:
+            self.prefix_tokens = self.prefix_tokens.to(device)
+        for ckpt in self.checkpoints.values():
+            ckpt.to(device)
+        self.kv_cache_keys = {k: v.to(device) for k, v in self.kv_cache_keys.items()}
+        self.kv_cache_values = {k: v.to(device) for k, v in self.kv_cache_values.items()}
+        return self
 
 
 # ---------------------------------------------------------------------------

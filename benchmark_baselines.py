@@ -13,6 +13,7 @@ instead of real reading from cache, since hf does not seem to support this.
 Modifying transformer's cache behavior would involve modifying attention kernel.
 """
 
+import gc
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,6 +39,11 @@ from checkpoint_cache import (
     _sync_device,
     _checkpoint_positions,
 )
+
+
+def _free_gpu():
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def _block_positions(seq_len, block_size):
@@ -132,58 +138,37 @@ def main(cfg: DictConfig):
     results = {k: [] for k in keys}
     cache_sizes = {k: [] for k in keys}
 
-    # Dry-run warmup: run every seq_len once to trigger torch kernel caching / JIT / ...
+    # Warmup: use smallest and largest seq_len to cover kernel JIT range
     print("Warming up...")
-    for N in seq_lens:
+    for N in [seq_lens[0], seq_lens[-1]]:
         torch.manual_seed(bb.seed)
         ids = torch.randint(0, config.vocab_size, (1, N)).to(dev)
         prefill_baseline(model, ids)
+        del ids; _free_gpu()
+        ids = torch.randint(0, config.vocab_size, (1, N)).to(dev)
         with disable_attention_layers(model):
             prefill_baseline(model, ids)
+        del ids; _free_gpu()
     _sync_device(dev)
     print("Warmup done.\n")
 
     for N in seq_lens:
         torch.manual_seed(bb.seed)
+        _free_gpu()
 
-        # Per-N warmup 
+        # Per-N warmup
         input_ids = torch.randint(0, config.vocab_size, (1, N))
         prefill_baseline(model, input_ids)
+        _free_gpu()
 
-        # Capture checkpoints
+        # Capture checkpoints — offload each to CPU immediately
         input_ids = torch.randint(0, config.vocab_size, (1, N))
         log_store = prefill_and_capture_at(model, input_ids, _checkpoint_positions(N))
+        log_store.to("cpu"); _free_gpu()
         block_store = prefill_and_capture_at(model, input_ids, _block_positions(N, B))
+        block_store.to("cpu"); _free_gpu()
 
-        # 1. No cache
-        t_no_cache = _time(n_runs, dev, prefill_baseline, model, input_ids)
-
-        # 2. Attention-only KV cache = skip attention layers, keep GDN+FFN
-        with disable_attention_layers(model):
-            t_attn_only = _time(n_runs, dev, prefill_baseline, model, input_ids)
-
-        t_attn_cost = max(t_no_cache - t_attn_only, 0)
-
-        # 3. Block hybrid + attention: resume from block boundary, full pipeline
-        t_block_and_attn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, block_store)
-
-        # 4. Logarithmic + attention: resume from 2^i, full pipeline
-        t_log_and_attn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, log_store)
-
-        # 5. Block (no attn) = GDN-only for remaining tokens + attention cost for all N
-        with disable_attention_layers(model):
-            t_block_gdn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, block_store)
-        t_block = t_block_gdn + t_attn_cost
-
-        # 6. Log (no attn) = GDN-only for remaining tokens + attention cost for all N
-        with disable_attention_layers(model):
-            t_log_gdn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, log_store)
-        t_log = t_log_gdn + t_attn_cost
-
-        for k, v in zip(keys, [t_no_cache, t_attn_only, t_block, t_log, t_block_and_attn, t_log_and_attn]):
-            results[k].append(v)
-
-        # Cache sizes (bytes)
+        # Cache sizes (bytes) — computed on CPU tensors, same values
         kv_bytes = sum(t.nelement() * t.element_size() for s in [log_store]
                        for t in list(s.kv_cache_keys.values()) + list(s.kv_cache_values.values()))
         def _gdn_bytes(store):
@@ -192,6 +177,44 @@ def main(cfg: DictConfig):
                        for t in list(ckpt.recurrent_states.values()) + list(ckpt.conv_states.values()))
         log_gdn_bytes = _gdn_bytes(log_store)
         block_gdn_bytes = _gdn_bytes(block_store)
+        log_ckpt = log_store.best_checkpoint(N)
+        block_ckpt = block_store.best_checkpoint(N)
+
+        # 1. No cache
+        t_no_cache = _time(n_runs, dev, prefill_baseline, model, input_ids)
+        _free_gpu()
+
+        # 2. Attention-only KV cache = skip attention layers, keep GDN+FFN
+        with disable_attention_layers(model):
+            t_attn_only = _time(n_runs, dev, prefill_baseline, model, input_ids)
+        _free_gpu()
+
+        t_attn_cost = max(t_no_cache - t_attn_only, 0)
+
+        # 3. Block hybrid + attention: resume from block boundary, full pipeline
+        block_store.to(dev)
+        t_block_and_attn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, block_store)
+        _free_gpu()
+
+        # 5. Block (no attn) = GDN-only for remaining tokens + attention cost for all N
+        with disable_attention_layers(model):
+            t_block_gdn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, block_store)
+        t_block = t_block_gdn + t_attn_cost
+        block_store.to("cpu"); _free_gpu()
+
+        # 4. Logarithmic + attention: resume from 2^i, full pipeline
+        log_store.to(dev)
+        t_log_and_attn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, log_store)
+        _free_gpu()
+
+        # 6. Log (no attn) = GDN-only for remaining tokens + attention cost for all N
+        with disable_attention_layers(model):
+            t_log_gdn = _time(n_runs, dev, prefill_from_checkpoint, model, input_ids, log_store)
+        t_log = t_log_gdn + t_attn_cost
+        log_store.to("cpu"); _free_gpu()
+
+        for k, v in zip(keys, [t_no_cache, t_attn_only, t_block, t_log, t_block_and_attn, t_log_and_attn]):
+            results[k].append(v)
 
         cache_sizes['no_cache'].append(0)
         cache_sizes['attn_only'].append(kv_bytes)
@@ -200,8 +223,6 @@ def main(cfg: DictConfig):
         cache_sizes['block_and_attn'].append(kv_bytes + block_gdn_bytes)
         cache_sizes['log_and_attn'].append(kv_bytes + log_gdn_bytes)
 
-        log_ckpt = log_store.best_checkpoint(N)
-        block_ckpt = block_store.best_checkpoint(N)
         print(
             f"N={N:5d} | "
             f"no_cache {t_no_cache*1000:7.1f}ms | "
@@ -211,6 +232,8 @@ def main(cfg: DictConfig):
             f"block+attn {t_block_and_attn*1000:7.1f}ms (skip {block_ckpt.position if block_ckpt else 0}) | "
             f"log+attn {t_log_and_attn*1000:7.1f}ms (skip {log_ckpt.position if log_ckpt else 0})"
         )
+
+        del log_store, block_store; _free_gpu()
 
     # --- Theoretical FLOPs and cache sizes ---
     m = cfg.model

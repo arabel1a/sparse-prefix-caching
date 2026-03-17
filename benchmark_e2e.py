@@ -99,33 +99,6 @@ from benchmark_baselines import prefill_and_capture_at, _block_positions, disabl
 
 
 # ---------------------------------------------------------------------------
-# CPU offloading for cache stores
-# ---------------------------------------------------------------------------
-def _store_to_cpu(store):
-    """Move all tensors in a PrefixCheckpointStore to CPU."""
-    for ckpt in store.checkpoints.values():
-        ckpt.recurrent_states = {k: v.cpu() for k, v in ckpt.recurrent_states.items()}
-        ckpt.conv_states = {k: v.cpu() for k, v in ckpt.conv_states.items()}
-    store.kv_cache_keys = {k: v.cpu() for k, v in store.kv_cache_keys.items()}
-    store.kv_cache_values = {k: v.cpu() for k, v in store.kv_cache_values.items()}
-    if store.prefix_tokens is not None:
-        store.prefix_tokens = store.prefix_tokens.cpu()
-    return store
-
-
-def _store_to_device(store, device):
-    """Move all tensors in a PrefixCheckpointStore to device."""
-    for ckpt in store.checkpoints.values():
-        ckpt.recurrent_states = {k: v.to(device) for k, v in ckpt.recurrent_states.items()}
-        ckpt.conv_states = {k: v.to(device) for k, v in ckpt.conv_states.items()}
-    store.kv_cache_keys = {k: v.to(device) for k, v in store.kv_cache_keys.items()}
-    store.kv_cache_values = {k: v.to(device) for k, v in store.kv_cache_values.items()}
-    if store.prefix_tokens is not None:
-        store.prefix_tokens = store.prefix_tokens.to(device)
-    return store
-
-
-# ---------------------------------------------------------------------------
 # Truncate store to fit budget: drop GDN checkpoints from the smallest
 # positions first until the store fits.  KV cache is never dropped since
 # it is shared by all strategies that use caching.
@@ -321,14 +294,14 @@ def simulate(model, requests, strategy, cache_budget, block_size=16, progress=Fa
             if cached_store is not None:
                 req_hit = True
                 hits += 1
-                _store_to_device(cached_store, dev)
+                cached_store.to(dev)
                 _sync_device(dev)
                 t0 = time.perf_counter()
                 prefill_from_checkpoint(model, input_ids, cached_store)
                 _sync_device(dev)
                 dt = time.perf_counter() - t0
                 total_time += dt
-                _store_to_cpu(cached_store)
+                cached_store.to("cpu")
 
                 ckpt = cached_store.best_checkpoint(seq_len)
                 if ckpt:
@@ -354,7 +327,7 @@ def simulate(model, requests, strategy, cache_budget, block_size=16, progress=Fa
                 store.kv_cache_values = {}
 
             size = store.memory_bytes()
-            _store_to_cpu(store)
+            store.to("cpu")
             cache.put((conv_id, n_turns), store, size)
 
             per_request.append({
