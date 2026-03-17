@@ -49,8 +49,12 @@ def _free_gpu():
 def _block_positions(seq_len, block_size):
     return list(range(block_size, seq_len + 1, block_size))
 
-def prefill_and_capture_at(model, input_ids, ckpt_positions):
-    """Run prefill capturing GDN+conv states and attention KV at specified positions."""
+def prefill_and_capture_at(model, input_ids, ckpt_positions, max_chunk=4096):
+    """Run prefill capturing GDN+conv states and attention KV at specified positions.
+
+    Large segments between checkpoint positions are split into sub-chunks of
+    at most ``max_chunk`` tokens to limit peak attention memory.
+    """
     device = _model_device(model)
     input_ids = input_ids.to(device)
     seq_len = input_ids.shape[1]
@@ -59,24 +63,30 @@ def prefill_and_capture_at(model, input_ids, ckpt_positions):
     attn_layers = _get_attention_layers(config)
 
     ckpt_positions = sorted(set(p for p in ckpt_positions if 0 < p <= seq_len))
+    ckpt_set = set(ckpt_positions)
     store = PrefixCheckpointStore(prefix_tokens=input_ids.clone())
     boundaries = sorted(set([0] + ckpt_positions + [seq_len]))
 
     cache = Qwen3_5DynamicCache(config=config)
     for i in range(len(boundaries) - 1):
-        start, end = boundaries[i], boundaries[i + 1]
-        with torch.no_grad():
-            out = model(
-                input_ids=input_ids[:, start:end],
-                past_key_values=cache,
-                use_cache=True,
-                cache_position=torch.arange(start, end, device=device),
-            )
-        cache = out.past_key_values
+        seg_start, seg_end = boundaries[i], boundaries[i + 1]
+        # Sub-chunk large segments
+        pos = seg_start
+        while pos < seg_end:
+            chunk_end = min(pos + max_chunk, seg_end)
+            with torch.no_grad():
+                out = model(
+                    input_ids=input_ids[:, pos:chunk_end],
+                    past_key_values=cache,
+                    use_cache=True,
+                    cache_position=torch.arange(pos, chunk_end, device=device),
+                )
+            cache = out.past_key_values
+            pos = chunk_end
 
-        if end in ckpt_positions:
-            store.checkpoints[end] = RecurrentCheckpoint(
-                position=end,
+        if seg_end in ckpt_set:
+            store.checkpoints[seg_end] = RecurrentCheckpoint(
+                position=seg_end,
                 recurrent_states={
                     li: cache.recurrent_states[li].clone()
                     for li in linear_layers if cache.recurrent_states[li] is not None
