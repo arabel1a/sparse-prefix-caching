@@ -35,7 +35,7 @@ Currently vLLM uses $O(L/B)$ checkpoints (linear in sequence length) to eliminat
 ![image](assets/qwen_3_5_27b.jpg)
 > Qwen3.5 architecture image from [CalvinXKY/InfraTech](https://github.com/CalvinXKY/InfraTech/tree/main/models/qwen3_5)
 
-## Baseline FLOPs
+#### Baseline FLOPs
 
 Since prefill is compute-bound, FLOP is a good proxy for latency. **Per token per layer group:**
 
@@ -51,7 +51,7 @@ Since prefill is compute-bound, FLOP is a good proxy for latency. **Per token pe
 | GDN recurrence (×3) | $3 \times n_v \times d_h^2$ | 2.36e6 | 7.86e5 | State shape $d_h \times d_h$ |
 | **Total** | | **1.52e9 + 6.1e3$N$** | **8.37e7 + 2.05e3$N$** | |
 
-## Theoretical FLOP savings and cache size
+#### Saved Flop Estimation
 
 | method | compute saved | cache size per layer group per sequence |
 | --- | --- | --- |
@@ -59,24 +59,13 @@ Since prefill is compute-bound, FLOP is a good proxy for latency. **Per token pe
 | Block hybrid cache | ~3/4 FFN + all GDN | $3L \times n_v \times d_h^2 / B$
 | Logarithmic | **worst case** 3/8 FFN + 1/2 GDN <br> **average** 9/16 FFN + 3/4 GDN | $3\log(L) \times n_v \times d_h^2$
 
-| 27B | 0.8B |
-| --- | --- |
-| ![flops_and_cache_27b](assets/flops_and_cache_size_27b.png) | ![flops_and_cache_0_8b](assets/flops_and_cache_size_0_8b.png) |
+## Huggingface Transformers prototype
 
-> Block hybrid shown for CUDA (B=16). Note, that full-attention cache and ssm cache can be combined; and for long realistic context size adding logarithmic hybrid cache to kvcache introduce deminishing cache size overhead while reducing computations by a margin.
-
-> **TODO:** although default for vllm steps on cuda, `blocksize=16` seem to be suboptimal for prefix caching. Sweep this.
-
-### Huggingface Transformers prototype
-
-> Note: the code is a mess and neurosloppy, I will (hopefully) update it once
-
-Maximum VRAM i can get is kaggle's T4, so I can't benchmark on hundrend-of-thousands context. But I can verify, that on $\leq 8K$ context my theoretical estimations align well with the real latency and cache size. I speculate here, that if it works as expected on medium context lengths, it will work as expected on larger ones.
-# TODO: add quantization to reduce memory footprint and increase tested max context length.
+> TODO: swipe block size
 
 ![empirical_0_8b](assets/benchmark_baselines_0_8b.png)
 
-The code can be found in `benchmark_baselines.py`.
+The code can be found in `benchmark_baselines.py`. Theoretical (dashed) lines correspond to number of floating-point operations according to the table above.
 
 ### E2E benchmark on ShareGPT traces
 

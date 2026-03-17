@@ -393,7 +393,7 @@ def main(cfg: DictConfig):
     print(f"Cache budget: {e2e.cache_budget_gb:.1f} GB = {e2e.cache_budget_gb * 1e9:.0f} bytes")
 
     cache_budget = int(e2e.cache_budget_gb * 1e9)
-    B = e2e.block_size
+    B = cfg.baseline.block_size
     progress = e2e.progress
 
     # Run all 6 direct simulations

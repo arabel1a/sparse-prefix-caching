@@ -146,7 +146,7 @@ def main(cfg: DictConfig):
 
     bb = cfg.benchmark_baselines
     seq_lens = list(bb.seq_lens)
-    B = bb.block_size
+    B = cfg.baseline.block_size
     n_runs = bb.n_runs
 
     keys = ['no_cache', 'attn_only', 'block', 'log', 'block_and_attn', 'log_and_attn']
@@ -339,7 +339,7 @@ def main(cfg: DictConfig):
     line_specs = [
         ('no_cache',      'No caching',               'black',      'o', '-',  2),
         ('attn_only',     'Attention-only KV cache',   'tab:red',    's', '-',  2),
-        ('block', f'Block hybrid B={B} (CUDA)','tab:blue',   '^', '-',  1.5),
+        ('block', f'Block hybrid B={B} ','tab:blue',   '^', '-',  1.5),
         ('log',   'Logarithmic',               'tab:orange', 'v', '-',  2),
         ('block_and_attn',    'Attention + Block hybrid',   'tab:green',  'D', '-',  2),
         ('log_and_attn',      'Attention + Logarithmic',    'tab:purple', 'p', '-',  2),

@@ -20,8 +20,11 @@ model:
   max_position_embeddings: 262144
   rope_theta: 10000000.0
 
+baseline:
+  block_size: 128
+
 device: cuda  # cpu, cuda, mps
-dtype: float16  # cpu, cuda, mps
+dtype: float16  # allows to make use of my 2080's tensorcores
 
 test:
   seq_len: 100
@@ -41,7 +44,6 @@ profile:
 
 benchmark_baselines:
   seq_lens: [1023, 1024, 1536, 2047, 2048, 3072, 4095, 4096, 6144, 8191, 8192, 16383, 16384, 32767, 32768]
-  block_size: 16
   n_runs: 3
   seed: 42
   output: assets/benchmark_baselines_0_8b.png
@@ -52,7 +54,6 @@ benchmark_e2e:
   max_seq_len: 16384
   max_rounds: 50 # there are few very long sequences, which bloats the number of requests
   cache_budget_gb: 1.0
-  block_size: 16
   seed: 42
   output_dir: outputs/0_8b
   boxplots: assets/benchmark_e2e_0_8b.png
