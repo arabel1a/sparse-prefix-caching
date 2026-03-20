@@ -169,7 +169,7 @@ def test_correctness(cfg):
     hidden_baseline, cache_baseline = prefill_baseline(model, input_ids)
 
     # Capture checkpoints using logarithmic positions
-    positions = checkpoint_positions("log", seq_len)
+    positions = checkpoint_positions(seq_len, tag="log")
     store = prefill_and_capture_at(model, input_ids, positions)
 
     hidden_restored, cache_restored = prefill_from_checkpoint(model, input_ids, store)

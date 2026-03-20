@@ -3,6 +3,7 @@ import math
 
 STRATEGIES = [
     "no_cache",
+    "kv_only",
     "balanced_fix_blocksize",
     "balanced_fix_nblocks",
     "sqrt",
@@ -27,16 +28,20 @@ def diadic_positions(seq_len: int) -> list[int]:
         i += 1
     return positions
 
-def checkpoint_positions(strategy, seq_len, block_size=None, n_blocks=None):
-    """Return list of positions where checkpoints should be captured."""
-    if strategy == "no_cache":
+def checkpoint_positions(seq_len, *, tag, block_size=None, n_blocks=None, **_ignored):
+    """Return list of positions where GDN checkpoints should be captured.
+
+    Accepts the full strategy config dict as kwargs
+    (e.g. ``checkpoint_positions(seq_len, **strategy)``).
+    """
+    if tag in ("no_cache", "kv_only"):
         return []
-    if strategy in ("block", "balanced_fix_blocksize"):
+    if tag in ("block", "balanced_fix_blocksize"):
         return balanced_positions(seq_len, block_size=block_size)
-    if strategy == "balanced_fix_nblocks":
+    if tag == "balanced_fix_nblocks":
         return balanced_positions(seq_len, n_blocks=n_blocks)
-    if strategy == "sqrt":
+    if tag == "sqrt":
         return sqrt_positions(seq_len)
-    if strategy in ("log", "dyadic"):
+    if tag in ("log", "dyadic", "diadic"):
         return diadic_positions(seq_len)
-    raise ValueError(f"Unknown strategy: {strategy}")
+    raise ValueError(f"Unknown strategy: {tag}")

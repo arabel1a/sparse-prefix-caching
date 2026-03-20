@@ -19,8 +19,50 @@ data:
   max_rounds: 36 # there are few sequences of very many rounds (up to 800), which bloats the number of requests (quadratic amount of total token). I filter 95th percentile
   max_rows: 1000000
  
-baseline:
-  block_size: 128 # block size for dense caching
+strategies:
+  - tag: "no_cache"
+    name: "No caching"
+    color: "black"
+    marker: "o"
+    linestyle: "-"
+    linewidth: 2
+
+  - tag: "kv_only"
+    name: "KV cache only"
+    color: "tab:red"
+    marker: "s"
+    linestyle: "-"
+    linewidth: 2
+
+  - tag: "balanced_fix_blocksize"
+    block_size: 128
+    name: "Block (B=128)"
+    color: "tab:blue"
+    marker: "^"
+    linestyle: "-"
+    linewidth: 1.5
+
+  - tag: "balanced_fix_nblocks"
+    n_blocks: 4
+    name: "Balanced (4 blocks)"
+    color: "tab:cyan"
+    marker: "D"
+    linestyle: "-"
+    linewidth: 1.5
+
+  - tag: "sqrt"
+    name: "Sqrt"
+    color: "tab:green"
+    marker: "p"
+    linestyle: "-"
+    linewidth: 2
+
+  - tag: "diadic"
+    name: "Logarithmic"
+    color: "tab:orange"
+    marker: "v"
+    linestyle: "-"
+    linewidth: 2
 
 # Qwen3.5-0.8B dimensions
 model:
@@ -50,11 +92,9 @@ test:
 
 benchmark_baselines:
   seq_lens: [1023, 1024, 1536, 2047, 2048, 3072, 4095, 4096, 6144, 8191, 8192, 16383, 16384, 32767, 32768]
-  strategies: [no_cache, block, log]
   n_runs: 3
 
 benchmark_e2e:
-  strategies: [no_cache, block, log]
   cache_budget_gb: 4.0
   progress: true
 
@@ -62,27 +102,8 @@ overlap_distribution:
   batch_size: 5000
 
 prepare_data:
-  _target_: prepare_data.prepare_all  # or prepare_data.tokenize, prepare_data.compute_overlap
+  _target_: prepare_data.tokenize  # or prepare_data.tokenize, prepare_data.compute_overlap
   tokenizer_chunk_size: 2048
 
 plot_results:
   _target_: plot_results.plot_all  # or plot_results.plot_overlap, plot_results.plot_baselines, etc.
-  no_cache:      
-     - 'No caching'
-     - 'black'
-     - 'o' 
-     - '-'
-     - 2
-  block:
-    - 'No caching'
-    - 'black'
-    - 'o' 
-    - '-'
-    - 2
-
-  log:
-    - 'No caching'
-    - 'black'
-    - 'o' 
-    - '-'
-    - 2

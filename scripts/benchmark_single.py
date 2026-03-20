@@ -44,19 +44,19 @@ def main(cfg: DictConfig):
 
     bb = cfg.benchmark_baselines
     seq_lens = list(bb.seq_lens)
-    B = cfg.baseline.block_size
     n_runs = bb.n_runs
-    strategies = list(bb.strategies)
+    strategies = list(cfg.strategies)
 
-    all_keys = list(strategies)
-    results = {k: [] for k in all_keys}
-    cache_sizes = {k: [] for k in all_keys}
+    all_tags = [s.tag for s in strategies]
+    results = {t: [] for t in all_tags}
+    cache_sizes = {t: [] for t in all_tags}
     completed_seq_lens = []
 
     out_path = out_dir / "baselines_results.json"
     model_params = OmegaConf.to_container(cfg.model, resolve=True)
+    strategy_styles = OmegaConf.to_container(cfg.strategies, resolve=True)
 
-    # Warmup todo: move to common
+    # Warmup
     log.info("Warming up...")
     warmup(model, seq_lens[0])
     warmup(model, seq_lens[-1])
@@ -82,35 +82,35 @@ def main(cfg: DictConfig):
 
         # Checkpoint strategies: always include KV cache
         for strat in strategies:
-            if strat == "no_cache":
+            if strat.tag == "no_cache":
                 continue
 
-            positions = checkpoint_positions(strat, N, B)
+            positions = checkpoint_positions(N, **strat)
             store = prefill_and_capture_at(model, input_ids, positions)
-            bytes_map[strat] = store.memory_bytes()
+            bytes_map[strat.tag] = store.memory_bytes()
             store.to("cpu")
 
-            times[strat] = time_fn(n_runs, dev, prefill_from_checkpoint, model, input_ids, store)
+            times[strat.tag] = time_fn(n_runs, dev, prefill_from_checkpoint, model, input_ids, store)
 
             del store; free_gpu()
             reset_peak_memory()
 
-        for k in all_keys:
-            results[k].append(times.get(k, 0))
-            cache_sizes[k].append(bytes_map.get(k, 0))
+        for t in all_tags:
+            results[t].append(times.get(t, 0))
+            cache_sizes[t].append(bytes_map.get(t, 0))
 
         completed_seq_lens.append(N)
 
         parts = [f"N={N:5d}"]
-        for k in all_keys:
-            parts.append(f"{k} {times.get(k, 0)*1000:7.1f}ms")
+        for t in all_tags:
+            parts.append(f"{t} {times.get(t, 0)*1000:7.1f}ms")
         log.info(" | ".join(parts))
         _save_results(out_path, {
             "model_name": cfg.model.name,
-            "block_size": B,
             "seq_lens": completed_seq_lens,
-            "strategies": {k: {"times_s": results[k], "cache_bytes": cache_sizes[k]} for k in all_keys},
+            "strategies": {t: {"times_s": results[t], "cache_bytes": cache_sizes[t]} for t in all_tags},
             "model_params": model_params,
+            "strategy_styles": strategy_styles,
         })
         log.info("Saved results to %s", out_path)
 

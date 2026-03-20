@@ -97,7 +97,7 @@ def interleave(requests, seed):
 
 
 def simulate(model, requests, conv_tokens, vocab_size, strategy, cache_budget,
-             block_size, progress=False):
+             progress=False):
     """Run all requests through the model with given caching strategy.
 
     All checkpoint strategies store both GDN recurrent states and attention KV
@@ -105,11 +105,11 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy, cache_budget,
     needs hidden states produced by GDN FFNs).
     """
     dev = _model_device(model)
-    uses_cache = strategy != "no_cache"
+    uses_cache = strategy.tag != "no_cache"
     cache = PrefixCache(cache_budget) if uses_cache else None
     per_request = []
 
-    for conv_id, turn, n_msgs in tqdm(requests, desc=strategy, disable=not progress):
+    for conv_id, turn, n_msgs in tqdm(requests, desc=strategy.tag, disable=not progress):
         all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
         input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
         seq_len = input_ids.shape[1]
@@ -140,7 +140,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy, cache_budget,
 
         # Capture checkpoints for cache
         if uses_cache:
-            positions = checkpoint_positions(strategy, seq_len, block_size)
+            positions = checkpoint_positions(seq_len, **strategy)
             store = prefill_and_capture_at(model, input_ids, positions)
             size = store.memory_bytes()
             store.to("cpu")
@@ -168,10 +168,8 @@ def main(cfg: DictConfig):
     dev = _model_device(model)
     config = model.config
     e2e = cfg.benchmark_e2e
-
-    strategies = list(e2e.strategies)
+    strategies = list(cfg.strategies)
     cache_budget = int(e2e.cache_budget_gb * 1e9)
-    B = cfg.baseline.block_size
     progress = e2e.get("progress", True)
 
     # Load and interleave requests
@@ -193,27 +191,29 @@ def main(cfg: DictConfig):
         prefill_baseline(model, dummy)
     _sync_device(dev)
 
+    from omegaconf import OmegaConf
     summary = {
         "model_name": cfg.model.name,
-        "block_size": B,
         "n_requests": len(requests),
         "total_tokens": total_tokens,
         "cache_budget_gb": e2e.cache_budget_gb,
         "strategies": {},
+        "strategy_styles": OmegaConf.to_container(cfg.strategies, resolve=True),
     }
     summary_path = out_dir / "e2e_summary.json"
 
     for strat in strategies:
-        log.info("Strategy: %s", strat)
+        log.info("Strategy: %s", strat.tag)
         res = simulate(model, requests, conv_tokens, vocab_size,
-                       strat, cache_budget, B, progress=progress)
+                       strat, cache_budget, progress=progress)
 
-        log.info("  %s: total=%.1fs", strat, res["total_time"])
+        log.info("  %s: total=%.1fs", strat.tag, res["total_time"])
         if res["hits"] > 0:
             log.info("    hits: %d/%d (%.1f%%)",
                      res["hits"], len(requests), res["hits"] / len(requests) * 100)
-        _save_jsonl(out_dir / f"e2e_{strat}.jsonl", res["per_request"])
-        summary["strategies"][strat] = {
+
+        _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
+        summary["strategies"][strat.tag] = {
             "total_time": res["total_time"],
             "hits": res["hits"],
             "tokens_saved": res["tokens_saved"],

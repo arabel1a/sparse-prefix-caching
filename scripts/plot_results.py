@@ -16,33 +16,35 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Style constants shared across plots
-# ---------------------------------------------------------------------------
-LINE_SPECS = {
-    'no_cache':      ('No caching',             'black',      'o', '-',  2),
-    'attn_only':     ('Attention-only KV cache', 'tab:red',    's', '-',  2),
-    'block':         ('Block + KV cache',        'tab:blue',   '^', '-',  1.5),
-    'log':           ('Logarithmic + KV cache',  'tab:orange', 'v', '-',  2),
-}
+def _build_style_map(strategies_cfg):
+    """Build {tag: (label, color, marker, ls, lw)} from hydra strategies config."""
+    out = {}
+    for s in strategies_cfg:
+        out[s.tag] = (
+            s.name,
+            s.color,
+            s.marker,
+            s.get("linestyle", "-"),
+            s.get("linewidth", 2),
+        )
+    return out
 
 
-def _spec(key, block_size=None):
-    label, color, marker, ls, lw = LINE_SPECS[key]
-    if key == 'block' and block_size:
-        label = f'{label} B={block_size}'
-    return label, color, marker, ls, lw
+def _spec(key, style_map):
+    if key in style_map:
+        return style_map[key]
+    return key, 'gray', 'x', '-', 1
 
 
 # ---------------------------------------------------------------------------
 # Baselines plot
 # ---------------------------------------------------------------------------
-def plot_baselines(out_dir, root_dir=None, **_kw):
+def plot_baselines(out_dir, root_dir=None, style_map=None, **_kw):
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
     path = root_dir / "benchmark_single" / "baselines_results.json"
@@ -52,9 +54,7 @@ def plot_baselines(out_dir, root_dir=None, **_kw):
 
     data = json.loads(path.read_text())
     seq_lens = data["seq_lens"]
-    B = data["block_size"]
     strategies = data["strategies"]
-    print(strategies)
     m = data["model_params"]
     model_name = data["model_name"]
 
@@ -76,22 +76,32 @@ def plot_baselines(out_dir, root_dir=None, **_kw):
     flop_ga_linear = flop_ffn / n_layers + flop_ga_proj
     flop_gdn_recompute = flop_ffn * gdn_per_group / n_layers + flop_gdn_proj + flop_gdn_rec
 
-    # Theoretical FLOPs per strategy.
     # All checkpoint strategies assume KV cache is always stored alongside GDN
     # checkpoints, since without KV the GA layer needs hidden states from GDN
     # FFNs and we cannot skip any GDN compute for the prefix.
     flop_per_tok = flop_ga_linear + flop_gdn_recompute
 
-    # Tail tokens: tokens after the best checkpoint that must be recomputed
-    n_tail_block = N_arr % B
-    n_tail_log = N_arr - 2.0 ** np.floor(np.log2(N_arr))
-
+    # Theoretical FLOPs per strategy — keyed by tag
     theo = {}
     theo['no_cache'] = N_arr * flop_per_tok + N_arr**2 * flop_ga_quad_per_tok
-    theo['attn_only'] = N_arr * flop_gdn_recompute
-    # block/log: recompute only tail through full model; tail attends to full context
-    theo['block'] = n_tail_block * flop_per_tok + n_tail_block * N_arr * flop_ga_quad_per_tok
-    theo['log'] = n_tail_log * flop_per_tok + n_tail_log * N_arr * flop_ga_quad_per_tok
+    theo['kv_only'] = N_arr * flop_gdn_recompute
+    # For block-based strategies, need block_size from the strategy config
+    for tag in strategies:
+        if tag in theo:
+            continue
+        # Try to find block_size from strategy_styles saved in data
+        styles = data.get("strategy_styles", [])
+        s_cfg = next((s for s in styles if s["tag"] == tag), {})
+        if s_cfg.get("block_size"):
+            B = s_cfg["block_size"]
+            n_tail = N_arr % B
+            theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
+        elif tag in ("diadic", "dyadic"):
+            n_tail = N_arr - 2.0 ** np.floor(np.log2(N_arr))
+            theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
+        elif tag == "sqrt":
+            n_tail = N_arr % np.floor(np.sqrt(N_arr)).astype(int)
+            theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
 
     # Scale theoretical to empirical
     if 'no_cache' in strategies:
@@ -108,14 +118,24 @@ def plot_baselines(out_dir, root_dir=None, **_kw):
     conv_state_per_ckpt = gdn_per_group * conv_dim * m["linear_conv_kernel_dim"] * bpe
     per_ckpt = gdn_state_per_ckpt + conv_state_per_ckpt
 
-    n_block_ckpts = np.floor(N_arr / B)
-    n_log_ckpts = np.floor(np.log2(N_arr)) + 1
-
     theo_cache = {}
     theo_cache['no_cache'] = np.zeros_like(N_arr)
-    theo_cache['attn_only'] = N_arr * attn_kv_per_token
-    theo_cache['block'] = N_arr * attn_kv_per_token + n_block_ckpts * per_ckpt
-    theo_cache['log'] = N_arr * attn_kv_per_token + n_log_ckpts * per_ckpt
+    theo_cache['kv_only'] = N_arr * attn_kv_per_token
+    for tag in strategies:
+        if tag in theo_cache:
+            continue
+        styles = data.get("strategy_styles", [])
+        s_cfg = next((s for s in styles if s["tag"] == tag), {})
+        if s_cfg.get("block_size"):
+            B = s_cfg["block_size"]
+            n_ckpts = np.floor(N_arr / B)
+            theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
+        elif tag in ("diadic", "dyadic"):
+            n_ckpts = np.floor(np.log2(N_arr)) + 1
+            theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
+        elif tag == "sqrt":
+            n_ckpts = np.floor(np.sqrt(N_arr))
+            theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
 
     # --- Plot ---
     to_ms = lambda a: np.array(a) * 1000
@@ -124,7 +144,7 @@ def plot_baselines(out_dir, root_dir=None, **_kw):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
 
     for key in strategies:
-        label, color, marker, ls, lw = _spec(key, B)
+        label, color, marker, ls, lw = _spec(key, style_map)
         ax1.plot(N_arr, to_ms(strategies[key]['times_s']), marker=marker, ls=ls,
                  label=label, color=color, lw=lw, markersize=5)
         if key in theo and flop_scale:
@@ -143,7 +163,7 @@ def plot_baselines(out_dir, root_dir=None, **_kw):
     for key in strategies:
         if key == 'no_cache':
             continue
-        label, color, marker, ls, lw = _spec(key, B)
+        label, color, marker, ls, lw = _spec(key, style_map)
         ax2.plot(N_arr, to_mb(strategies[key]['cache_bytes']), marker=marker, ls=ls,
                  label=label, color=color, lw=lw, markersize=5)
         if key in theo_cache:
@@ -176,7 +196,7 @@ def _load_jsonl(path):
     return entries
 
 
-def plot_e2e(out_dir, root_dir=None, **_kw):
+def plot_e2e(out_dir, root_dir=None, style_map=None, **_kw):
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
     data_dir = root_dir / "benchmark_e2e"
@@ -187,7 +207,6 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
 
     summary = json.loads(summary_path.read_text())
     model_name = summary["model_name"]
-    B = summary["block_size"]
     strat_keys = list(summary["strategies"].keys())
 
     # Load per-request data
@@ -208,7 +227,7 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
     # --- Boxplots ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-    box_labels = {s: _spec(s, B)[0].replace(' ', '\n', 1) for s in report}
+    box_labels = {s: _spec(s, style_map)[0].replace(' ', '\n', 1) for s in report}
 
     bp1 = ax1.boxplot(
         [times_ms[s] for s in report],
@@ -217,7 +236,7 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
         flierprops=dict(markersize=2, alpha=0.5),
     )
     for patch, s in zip(bp1["boxes"], report):
-        patch.set_facecolor(_spec(s)[1])
+        patch.set_facecolor(_spec(s, style_map)[1])
         patch.set_alpha(0.6)
     ax1.set_ylabel("Per-request prefill time (ms)")
     ax1.set_title(f"Time distribution — {model_name}")
@@ -234,7 +253,7 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
             flierprops=dict(markersize=2, alpha=0.5),
         )
         for patch, s in zip(bp2["boxes"], speedup_strats):
-            patch.set_facecolor(_spec(s)[1])
+            patch.set_facecolor(_spec(s, style_map)[1])
             patch.set_alpha(0.6)
         ax2.axhline(y=1.0, color="black", ls="--", lw=1, alpha=0.5)
         ax2.set_ylabel("Speedup vs no-cache")
@@ -251,7 +270,7 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
     fig2, (ax3, ax4) = plt.subplots(1, 2, figsize=(16, 6))
 
     for s in report:
-        label, color, *_ = _spec(s, B)
+        label, color, *_ = _spec(s, style_map)
         seq_lens = np.array([e["seq_len"] for e in per_request[s]])
         ax3.scatter(seq_lens, times_ms[s], s=6, alpha=0.3, color=color, label=label)
 
@@ -264,7 +283,7 @@ def plot_e2e(out_dir, root_dir=None, **_kw):
 
     if baseline_ms is not None:
         for s in speedup_strats:
-            label, color, *_ = _spec(s, B)
+            label, color, *_ = _spec(s, style_map)
             seq_lens = np.array([e["seq_len"] for e in per_request[s]])
             ax4.scatter(seq_lens, speedups[s], s=6, alpha=0.3, color=color, label=label)
 
@@ -353,11 +372,11 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
 # ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
-def plot_all(out_dir, root_dir=None, **_kw):
+def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
-    plot_baselines(out_dir, root_dir=root_dir)
-    plot_e2e(out_dir, root_dir=root_dir)
+    plot_baselines(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_e2e(out_dir, root_dir=root_dir, style_map=style_map)
     plot_overlap(out_dir, root_dir=root_dir)
 
 
@@ -369,9 +388,10 @@ def main(cfg: DictConfig):
     from spase_cache.utils import setup_output_dir
     root_dir = Path(cfg.output_dir)
     out_dir = setup_output_dir(cfg, "plot_results")
+    style_map = _build_style_map(cfg.strategies)
 
     print(f"Plotting results from {root_dir} into {out_dir}")
-    hydra.utils.call(cfg.plot_results, out_dir=out_dir, root_dir=root_dir)
+    hydra.utils.call(cfg.plot_results, out_dir=out_dir, root_dir=root_dir, style_map=style_map)
     print("Done.")
 
 
