@@ -47,92 +47,112 @@ def filter(raw_path, max_rounds, max_rows):
     return df
 
 
-def build_requests(df):
-    """Stack subsequent messages into cumulative LLM requests, keep only user-ending ones.
+def tokenize_messages(df, tokenizer_name, max_seq_len, chunk_size=4096):
+    """Tokenize each message individually and add tokens column.
 
-    Returns ts-sorted list of (conv_id, n_turns, ts, text).
+    Also formats each message as '<|role|> text' and concatenates consecutive
+    same-role messages. Adds cumulative token length per conversation for
+    truncation.
+
+    Returns a DataFrame with columns: url, role, ts, message_index, tokens, cum_tokens.
+    Only keeps rows where cum_tokens <= max_seq_len.
     """
-    requests = []
-    for url in df["url"].unique(maintain_order=True).to_list():
-        conv = df.filter(pl.col("url") == url).sort("message_index")
-        roles = conv["role"].to_list()
-        texts = conv["plain_text"].fill_null("").to_list()
-        tss = conv["ts"].to_list()
-
-        accumulated = ""
-        for i, (role, text, ts) in enumerate(zip(roles, texts, tss)):
-            if accumulated:
-                accumulated += "\n"
-            accumulated += f"<|{role}|> {text}"
-            if role == "user":
-                requests.append((url, i + 1, ts, accumulated))
-
-    requests.sort(key=lambda x: x[2])
-    log.info(f"Built {len(requests)} requests from {df.n_unique('url')} conversations")
-    return requests
-
-
-def tokenize(requests, tokenizer_name, max_seq_len):
-    """Tokenize requests, truncate to max_seq_len, remove duplicates from truncation."""
     log.info(f"Loading tokenizer {tokenizer_name}...")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
 
-    tokenized = []
-    last_len = {}
-    log.info("Tokenizing...")
-    for conv_id, n_turns, ts, text in tqdm(requests):
-        # if previous turn already hit max_seq_len, subsequent turns are identical after truncation
-        if last_len.get(conv_id, 0) >= max_seq_len:
-            continue
-        enc = tokenizer(
-            text,
-            add_special_tokens=False,
-            max_length=max_seq_len,
-            truncation=True,
-        )["input_ids"]
-        tokenized.append((conv_id, n_turns, ts, enc))
-        last_len[conv_id] = len(enc)
+    # format text as '<|role|> text' with \n separator between messages
+    df = df.with_columns(
+        (pl.col("message_index") == pl.col("message_index").min().over("url")).alias("_is_first")
+    )
+    df = df.with_columns(
+        (pl.when(pl.col("_is_first"))
+         .then(pl.lit("<|") + pl.col("role") + pl.lit("|> ") + pl.col("plain_text").fill_null(""))
+         .otherwise(pl.lit("\n<|") + pl.col("role") + pl.lit("|> ") + pl.col("plain_text").fill_null(""))
+        ).alias("_formatted")
+    ).drop("_is_first")
 
-    log.info(f"Tokenized: {len(tokenized)} requests ({len(requests) - len(tokenized)} duplicates removed)")
-    return tokenized
+    # tokenize in chunks to avoid holding all text in python at once
+    log.info("Tokenizing messages...")
+    formatted = df["_formatted"]
+    all_tokens = []
+    for i in range(0, len(formatted), chunk_size):
+        chunk_texts = formatted[i:i + chunk_size].to_list()
+        all_tokens.extend(tokenizer(chunk_texts, add_special_tokens=False)["input_ids"])
+        del chunk_texts
+    df = df.drop("_formatted", "plain_text").with_columns(pl.Series("tokens", all_tokens))
+    del all_tokens
+
+    # cumulative token count per conversation for truncation
+    df = df.with_columns(
+        pl.col("tokens").list.len().cum_sum().over("url").alias("cum_tokens")
+    )
+    n_before = len(df)
+    df = df.filter(pl.col("cum_tokens") <= max_seq_len)
+    log.info(f"Tokenized {len(df)} messages ({n_before - len(df)} truncated)")
+    return df
 
 
-def compute_overlap(tokenized, out_dir):
+def compute_overlap(df, out_dir):
     """Compute prefix overlap using trie over tokenized requests.
 
-    tokenized: ts-sorted list of (conv_id, n_turns, ts, token_ids)
+    Iterates user-ending turns sorted by ts. For each, the prefix is the
+    concatenation of all message tokens up to and including that turn.
     """
     log.info("Computing prefix overlap distribution...")
 
-    n_conversations = len(set(r[0] for r in tokenized))
-    log.info(f"{len(tokenized)} chronological requests from {n_conversations} conversations")
+    # get user-ending rows sorted by ts
+    user_rows = df.filter(pl.col("role") == "user").sort("ts")
+
+    n_conversations = user_rows.n_unique("url")
+    log.info(f"{len(user_rows)} requests from {n_conversations} conversations")
+
+    # precompute per-conversation token lists for fast prefix lookup
+    conv_tokens = {}
+    for url in df["url"].unique(maintain_order=True).to_list():
+        conv = df.filter(pl.col("url") == url).sort("message_index")
+        conv_tokens[url] = (
+            conv["message_index"].to_list(),
+            conv["tokens"].to_list(),
+        )
 
     root = _TrieNode()
     lcp_lengths = []
 
     log.info("Simulating non-deleting prefix cache...")
-    for conv_id, n_turns, ts, token_ids in tqdm(tokenized):
+    for url, msg_idx in tqdm(
+        zip(user_rows["url"].to_list(), user_rows["message_index"].to_list()),
+        total=len(user_rows),
+    ):
+        msg_indices, token_lists = conv_tokens[url]
+        # find how many messages to include (up to and including msg_idx)
+        n_msgs = 0
+        for mi in msg_indices:
+            n_msgs += 1
+            if mi == msg_idx:
+                break
+
         node = root
         lcp = 0
         matched = True
 
-        for t in token_ids:
-            t_int = int(t)
-            if matched and t_int in node.c:
-                lcp += 1
-                node = node.c[t_int]
-            else:
-                matched = False
-                new_node = _TrieNode()
-                node.c[t_int] = new_node
-                node = new_node
+        for tokens in token_lists[:n_msgs]:
+            for t in tokens:
+                t_int = int(t)
+                if matched and t_int in node.c:
+                    lcp += 1
+                    node = node.c[t_int]
+                else:
+                    matched = False
+                    new_node = _TrieNode()
+                    node.c[t_int] = new_node
+                    node = new_node
 
         lcp_lengths.append(lcp)
 
     overlap_path = out_dir / "overlap_lcp.json"
     overlap_path.write_text(json.dumps({
         "lcp_lengths": lcp_lengths,
-        "n_requests": len(tokenized),
+        "n_requests": len(user_rows),
         "n_conversations": n_conversations,
     }))
 
@@ -142,29 +162,20 @@ def compute_overlap(tokenized, out_dir):
     log.info(f"Overlap results saved to {overlap_path}")
 
 
-
-
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     out_dir = setup_output_dir(cfg)
 
     df = filter(cfg.data.raw_path, cfg.data.max_rounds, cfg.data.max_rows)
-    requests = build_requests(df)
-    del df
-    tokenized = tokenize(requests, cfg.model.tokenizer, cfg.data.max_seq_len)
-    del requests
+    df = tokenize_messages(df, cfg.model.tokenizer, cfg.data.max_seq_len)
 
-    # save tokenized requests for downstream LLM evaluation
+    # save for downstream benchmark_e2e
     prepared_path = Path(cfg.data.processed)
     prepared_path.parent.mkdir(parents=True, exist_ok=True)
-    import torch
-    torch.save(
-        [(conv_id, n_turns, ts, token_ids) for conv_id, n_turns, ts, token_ids in tokenized],
-        prepared_path,
-    )
-    log.info(f"Saved {len(tokenized)} tokenized requests to {prepared_path}")
+    df.write_parquet(prepared_path)
+    log.info(f"Saved {len(df)} messages to {prepared_path}")
 
-    compute_overlap(tokenized, out_dir)
+    compute_overlap(df, out_dir)
 
 if __name__ == "__main__":
     main()

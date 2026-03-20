@@ -1,10 +1,11 @@
 defaults:
   - config
+  - _self_
 
 output_dir: outputs/toy
 data:
   raw_path: data/chatgpt_results_final_language_filtered.csv
-  processed: data/toy
+  processed: data/toy.parquet
   max_seq_len: 2048 # maximum request length 
   max_rounds: 36 # there are few sequences of very many rounds (up to 800), which bloats the number of requests (quadratic amount of total token). I filter 95th percentile
   max_rows: 100
