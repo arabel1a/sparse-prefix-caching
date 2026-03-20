@@ -2,7 +2,8 @@
 
 Usage:
   python prepare_data.py
-  python prepare_data.py output_dir=outputs/overlap_statistics
+  python prepare_data.py prepare._target_=prepare_data.tokenize
+  python prepare_data.py prepare._target_=prepare_data.compute_overlap
 """
 import json
 import logging
@@ -23,7 +24,8 @@ log = logging.getLogger(__name__)
 _HASH_PRIME = 2654435761
 _HASH_MASK = (1 << 63) - 1
 
-def filter(raw_path, max_rounds, max_rows):
+
+def _filter(raw_path, max_rounds, max_rows):
     log.info(f"Loading {raw_path}...")
     df = pl.read_csv(raw_path)
     df = df.with_columns(
@@ -46,18 +48,12 @@ def filter(raw_path, max_rounds, max_rows):
     return df
 
 
-def tokenize_messages(df, tokenizer_name, max_seq_len, chunk_size=4096):
-    """Tokenize each message individually and add tokens column.
+def tokenize(out_dir, full_cfg, **_kw):
+    """Filter raw data, tokenize, and save parquet."""
+    df = _filter(full_cfg.data.raw_path, full_cfg.data.max_rounds, full_cfg.data.max_rows)
 
-    Also formats each message as '<|role|> text' and concatenates consecutive
-    same-role messages. Adds cumulative token length per conversation for
-    truncation.
-
-    Returns a DataFrame with columns: url, role, ts, message_index, tokens, cum_tokens.
-    Only keeps rows where cum_tokens <= max_seq_len.
-    """
-    log.info(f"Loading tokenizer {tokenizer_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+    log.info(f"Loading tokenizer {full_cfg.model.tokenizer}...")
+    tokenizer = AutoTokenizer.from_pretrained(full_cfg.model.tokenizer, use_fast=True)
 
     # format text as '<|role|> text' with \n separator between messages
     df = df.with_columns(
@@ -73,6 +69,7 @@ def tokenize_messages(df, tokenizer_name, max_seq_len, chunk_size=4096):
     # tokenize in chunks, converting to numpy immediately to avoid Python int overhead
     # (Python int = 28 bytes each vs numpy int32 = 4 bytes)
     log.info("Tokenizing messages...")
+    chunk_size = full_cfg.prepare_data.tokenizer_chunk_size
     formatted = df["_formatted"]
     all_tokens = []
     for i in tqdm(range(0, len(formatted), chunk_size), desc="tokenizing chunks"):
@@ -88,19 +85,28 @@ def tokenize_messages(df, tokenizer_name, max_seq_len, chunk_size=4096):
         pl.col("tokens").list.len().cum_sum().over("url").alias("cum_tokens")
     )
     n_before = len(df)
-    df = df.filter(pl.col("cum_tokens") <= max_seq_len)
+    df = df.filter(pl.col("cum_tokens") <= full_cfg.data.max_seq_len)
     log.info(f"Tokenized {len(df)} messages ({n_before - len(df)} truncated)")
-    return df
+
+    prepared_path = Path(full_cfg.data.processed)
+    prepared_path.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(prepared_path)
+    log.info(f"Saved {len(df)} messages to {prepared_path}")
 
 
-def _extract_overlap_data(df):
-    """Extract lightweight data needed for overlap computation."""
+def compute_overlap(out_dir, full_cfg, **_kw):
+    """Load tokenized parquet and compute prefix overlap distribution."""
+    out_dir = Path(out_dir)
+    prepared_path = Path(full_cfg.data.processed)
+    log.info(f"Loading {prepared_path}...")
+    df = pl.read_parquet(prepared_path)
+
     log.info("Computing prefix overlap distribution...")
-
     user_rows = df.filter(pl.col("role") == "user").sort("ts")
     n_conversations = user_rows.n_unique("url")
     log.info(f"{len(user_rows)} requests from {n_conversations} conversations")
 
+    # build compact lookup: url -> (msg_indices, token_arrays)
     conv_tokens = {}
     for url in df["url"].unique(maintain_order=True).to_list():
         conv = df.filter(pl.col("url") == url).sort("message_index")
@@ -111,12 +117,9 @@ def _extract_overlap_data(df):
 
     iter_urls = user_rows["url"].to_list()
     iter_msg_indices = user_rows["message_index"].to_list()
-    return conv_tokens, iter_urls, iter_msg_indices, n_conversations
+    del user_rows, df
 
-
-def compute_overlap(conv_tokens, iter_urls, iter_msg_indices, n_conversations, out_dir):
-    """Compute prefix overlap using rolling hash over tokenized requests."""
-    seen = set()  # rolling hashes at each token position
+    seen = set()
     lcp_lengths = []
 
     log.info("Simulating non-deleting prefix cache...")
@@ -125,7 +128,6 @@ def compute_overlap(conv_tokens, iter_urls, iter_msg_indices, n_conversations, o
         total=len(iter_urls),
     ):
         msg_indices, token_lists = conv_tokens[url]
-        # find how many messages to include (up to and including msg_idx)
         n_msgs = 0
         for mi in msg_indices:
             n_msgs += 1
@@ -160,22 +162,18 @@ def compute_overlap(conv_tokens, iter_urls, iter_msg_indices, n_conversations, o
     log.info(f"Overlap results saved to {overlap_path}")
 
 
+def prepare_all(out_dir, full_cfg, **_kw):
+    """Run tokenize then compute_overlap."""
+    tokenize(out_dir, full_cfg)
+    compute_overlap(out_dir, full_cfg)
+
+
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    out_dir = setup_output_dir(cfg)
+    out_dir = setup_output_dir(cfg, "prepare_data")
+    fn = hydra.utils.get_method(cfg.prepare_data._target_)
+    fn(out_dir=out_dir, full_cfg=cfg)
 
-    df = filter(cfg.data.raw_path, cfg.data.max_rounds, cfg.data.max_rows)
-    df = tokenize_messages(df, cfg.model.tokenizer, cfg.data.max_seq_len, cfg.data.tokenizer_chunk_size)
-
-    # save for downstream benchmark_e2e
-    prepared_path = Path(cfg.data.processed)
-    prepared_path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(prepared_path)
-    log.info(f"Saved {len(df)} messages to {prepared_path}")
-
-    overlap_data = _extract_overlap_data(df)
-    del df
-    compute_overlap(*overlap_data, out_dir)
 
 if __name__ == "__main__":
     main()

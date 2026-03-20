@@ -9,7 +9,6 @@ Available targets: plot_results.plot_all (default), plot_results.plot_baselines,
                    plot_results.plot_e2e, plot_results.plot_overlap
 """
 import json
-import os
 import logging
 from pathlib import Path
 
@@ -45,9 +44,10 @@ def _spec(key, block_size=None):
 # ---------------------------------------------------------------------------
 # Baselines plot
 # ---------------------------------------------------------------------------
-def plot_baselines(out_dir, **_kw):
+def plot_baselines(out_dir, root_dir=None, **_kw):
     out_dir = Path(out_dir)
-    path = out_dir / "baselines_results.json"
+    root_dir = Path(root_dir) if root_dir else out_dir
+    path = root_dir / "benchmark_single" / "baselines_results.json"
     if not path.exists():
         print(f"  skipping baselines plot ({path} not found)")
         return
@@ -173,9 +173,11 @@ def _load_jsonl(path):
     return entries
 
 
-def plot_e2e(out_dir, **_kw):
+def plot_e2e(out_dir, root_dir=None, **_kw):
     out_dir = Path(out_dir)
-    summary_path = out_dir / "e2e_summary.json"
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
     if not summary_path.exists():
         print(f"  skipping e2e plots ({summary_path} not found)")
         return
@@ -188,7 +190,7 @@ def plot_e2e(out_dir, **_kw):
     # Load per-request data
     per_request = {}
     for strat in strat_keys:
-        jsonl = out_dir / f"e2e_{strat}.jsonl"
+        jsonl = data_dir / f"e2e_{strat}.jsonl"
         if jsonl.exists():
             per_request[strat] = _load_jsonl(jsonl)
 
@@ -300,9 +302,10 @@ def plot_e2e(out_dir, **_kw):
 # ---------------------------------------------------------------------------
 # Overlap distribution plot
 # ---------------------------------------------------------------------------
-def plot_overlap(out_dir, **_kw):
+def plot_overlap(out_dir, root_dir=None, **_kw):
     out_dir = Path(out_dir)
-    path = out_dir / "overlap_lcp.json"
+    root_dir = Path(root_dir) if root_dir else out_dir
+    path = root_dir / "prepare_data" / "overlap_lcp.json"
     if not path.exists():
         log.info("skipping overlap plot (%s not found)", path)
         return
@@ -347,11 +350,12 @@ def plot_overlap(out_dir, **_kw):
 # ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
-def plot_all(out_dir, **_kw):
+def plot_all(out_dir, root_dir=None, **_kw):
     out_dir = Path(out_dir)
-    plot_baselines(out_dir)
-    plot_e2e(out_dir)
-    plot_overlap(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    plot_baselines(out_dir, root_dir=root_dir)
+    plot_e2e(out_dir, root_dir=root_dir)
+    plot_overlap(out_dir, root_dir=root_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -359,11 +363,12 @@ def plot_all(out_dir, **_kw):
 # ---------------------------------------------------------------------------
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    out_dir = Path(cfg.output_dir)
-    os.makedirs(out_dir, exist_ok=True)
+    from spase_cache.utils import setup_output_dir
+    root_dir = Path(cfg.output_dir)
+    out_dir = setup_output_dir(cfg, "plot_results")
 
-    print(f"Plotting results from {out_dir}")
-    hydra.utils.call(cfg.plot, out_dir=out_dir)
+    print(f"Plotting results from {root_dir} into {out_dir}")
+    hydra.utils.call(cfg.plot_results, out_dir=out_dir, root_dir=root_dir)
     print("Done.")
 
 

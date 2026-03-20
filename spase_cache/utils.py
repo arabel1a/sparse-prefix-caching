@@ -26,18 +26,23 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Output directory & logging
 # ---------------------------------------------------------------------------
-def setup_output_dir(cfg):
+def setup_output_dir(cfg, task: str):
     """Create output dir and configure file + console logging. Returns Path.
 
-    Uses hydra's run dir as default when cfg.output_dir is not set.
-    Hydra itself saves its config snapshot via output_subdir in config.yaml.
+    Each script gets its own subfolder: {output_dir}/{task}/.
+    The overwrite check applies to the task subfolder.
     """
     from hydra.core.hydra_config import HydraConfig
 
     if cfg.output_dir:
-        out_dir = Path(cfg.output_dir)
+        root_dir = Path(cfg.output_dir)
     else:
-        out_dir = Path(HydraConfig.get().runtime.output_dir)
+        root_dir = Path(HydraConfig.get().runtime.output_dir)
+    root_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir = root_dir / task
+    if not cfg.get("overwrite", True) and out_dir.exists():
+        raise FileExistsError(f"Output dir already exists and overwrite=False: {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
@@ -296,13 +301,13 @@ class PrefixCache:
             return self.entries[key][0]
         return None
 
-    def find_best_prefix(self, conv_id, n_turns):
-        """Find the longest cached prefix for this conversation with <= n_turns."""
-        for t in range(n_turns, 0, -1):
+    def find_best_prefix(self, conv_id, turn):
+        """Find the longest cached prefix for this conversation with turn index < turn."""
+        for t in range(turn - 1, -1, -1):
             k = (conv_id, t)
             if k in self.entries:
                 return self.entries[k][0], t
-        return None, 0
+        return None, -1
 
     def put(self, key, store, size_bytes):
         if size_bytes > self.budget:

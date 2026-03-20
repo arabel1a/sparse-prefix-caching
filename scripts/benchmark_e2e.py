@@ -1,10 +1,8 @@
 """End-to-end prefix caching evaluation on real conversation traces.
 
-Runs no_cache, block, and log strategies with FIFO prefix cache.
+Runs checkpoint placement strategies with FIFO prefix cache.
 Attention cost is measured once (no_cache full vs GDN-only) and added
 to checkpoint strategies per-request.
-
-Results saved as per-request JSONL and accumulated summary.
 """
 import spase_cache
 import json
@@ -38,23 +36,47 @@ from spase_cache.strategies import checkpoint_positions
 
 log = logging.getLogger(__name__)
 
-def load_requests(processed_path, vocab_size):
-    """Load pre-tokenized requests from prepare_data.py output.
+def load_requests(processed_path):
+    """Load pre-tokenized requests from prepare_data.py parquet output.
 
-    Token IDs are clamped to vocab_size since the benchmark model may have
-    a smaller vocabulary than the tokenizer (timing is token-value-independent).
+    Returns (requests, conv_tokens) where:
+      requests: list of (url, turn, n_msgs) lightweight descriptors
+      conv_tokens: dict url -> list of list[int] (per-message token lists)
+
+    Tensors are NOT materialized here; build them lazily in simulate().
     """
-    data = torch.load(processed_path, weights_only=False)
+    import polars as pl
+    df = pl.read_parquet(processed_path)
+
+    conv_tokens = {}
+    conv_msg_indices = {}
+    for url in df["url"].unique(maintain_order=True).to_list():
+        conv = df.filter(pl.col("url") == url).sort("message_index")
+        conv_tokens[url] = conv["tokens"].to_list()
+        conv_msg_indices[url] = conv["message_index"].to_list()
+
+    user_rows = df.filter(pl.col("role") == "user").sort("ts")
     requests = []
-    for conv_id, n_turns, ts, token_ids in data:
-        input_ids = torch.tensor([token_ids], dtype=torch.long) % vocab_size
-        requests.append((conv_id, n_turns, input_ids))
+    turn_counter = {}
+    for url, msg_idx in zip(
+        user_rows["url"].to_list(), user_rows["message_index"].to_list()
+    ):
+        n_msgs = conv_msg_indices[url].index(msg_idx) + 1
+        turn = turn_counter.get(url, 0)
+        turn_counter[url] = turn + 1
+        requests.append((url, turn, n_msgs))
+
     log.info("Loaded %d requests from %s", len(requests), processed_path)
-    return requests
+    return requests, conv_tokens
 
 
 def interleave(requests, seed):
-    """Interleave conversations with Poisson arrival times, preserving turn order."""
+    """
+    Interleave conversations with Poisson arrival times, preserving turn order.
+    This makes ny benchmark closer to real high-load system. Since the datset I
+    an using is crowdsourced, its timestamp almost never overlap. This will lead
+    to 100% cache hit -- each turn in conversation orrives right after previous.
+    """
     by_conv = defaultdict(list)
     for req in requests:
         by_conv[req[0]].append(req)
@@ -77,8 +99,8 @@ def interleave(requests, seed):
     return ordered
 
 
-def simulate(model, requests, strategy, cache_budget, block_size,
-             skip_attention=False, progress=False):
+def simulate(model, requests, conv_tokens, vocab_size, strategy, cache_budget,
+             block_size, skip_attention=False, progress=False):
     """Run all requests through the model with given caching strategy."""
     dev = _model_device(model)
     uses_cache = strategy != "no_cache"
@@ -88,8 +110,9 @@ def simulate(model, requests, strategy, cache_budget, block_size,
     per_request = []
 
     with ctx:
-        for conv_id, n_turns, input_ids in tqdm(requests, desc=strategy, disable=not progress):
-            input_ids = input_ids.to(dev)
+        for conv_id, turn, n_msgs in tqdm(requests, desc=strategy, disable=not progress):
+            all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
+            input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
             seq_len = input_ids.shape[1]
 
             hit = False
@@ -97,7 +120,7 @@ def simulate(model, requests, strategy, cache_budget, block_size,
             cached_store = None
 
             if uses_cache:
-                cached_store, _ = cache.find_best_prefix(conv_id, n_turns)
+                cached_store, _ = cache.find_best_prefix(conv_id, turn)
 
             if cached_store is not None:
                 hit = True
@@ -127,10 +150,10 @@ def simulate(model, requests, strategy, cache_budget, block_size,
                     store.kv_cache_values = {}
                 size = store.memory_bytes()
                 store.to("cpu")
-                cache.put((conv_id, n_turns), store, size)
+                cache.put((conv_id, turn), store, size)
 
             per_request.append({
-                "conv_id": str(conv_id), "n_turns": n_turns, "seq_len": seq_len,
+                "conv_id": str(conv_id), "turn": turn, "seq_len": seq_len,
                 "time_s": dt, "hit": hit, "tokens_saved": tokens_saved,
             })
 
@@ -146,7 +169,7 @@ def simulate(model, requests, strategy, cache_budget, block_size,
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    out_dir = setup_output_dir(cfg)
+    out_dir = setup_output_dir(cfg, "benchmark_e2e")
     model = make_model(cfg)
     dev = _model_device(model)
     config = model.config
@@ -158,10 +181,14 @@ def main(cfg: DictConfig):
     progress = e2e.get("progress", True)
 
     # Load and interleave requests
-    requests = load_requests(cfg.data.processed, config.vocab_size)
+    requests, conv_tokens = load_requests(cfg.data.processed)
     requests = interleave(requests, cfg.seed)
+    vocab_size = config.vocab_size
 
-    total_tokens = sum(ids.shape[1] for _, _, ids in requests)
+    total_tokens = sum(
+        sum(len(t) for t in conv_tokens[url][:n_msgs])
+        for url, _, n_msgs in requests
+    )
     log.info("Total requests: %d, tokens: %d, cache budget: %.1f GB",
              len(requests), total_tokens, e2e.cache_budget_gb)
 
@@ -192,10 +219,10 @@ def main(cfg: DictConfig):
 
     if has_ckpt_strategies:
         log.info("Measuring attention cost (no_cache full vs GDN-only)...")
-        res_full = simulate(model, requests, "no_cache", 0, B,
-                            skip_attention=False, progress=progress)
-        res_gdn = simulate(model, requests, "no_cache", 0, B,
-                           skip_attention=True, progress=progress)
+        res_full = simulate(model, requests, conv_tokens, vocab_size,
+                            "no_cache", 0, B, skip_attention=False, progress=progress)
+        res_gdn = simulate(model, requests, conv_tokens, vocab_size,
+                           "no_cache", 0, B, skip_attention=True, progress=progress)
         attn_costs = [
             max(f["time_s"] - g["time_s"], 0)
             for f, g in zip(res_full["per_request"], res_gdn["per_request"])
@@ -208,11 +235,12 @@ def main(cfg: DictConfig):
             if res_full is not None:
                 res = res_full
             else:
-                res = simulate(model, requests, "no_cache", 0, B, progress=progress)
+                res = simulate(model, requests, conv_tokens, vocab_size,
+                              "no_cache", 0, B, progress=progress)
         else:
             # Run with skipped attention, add per-request attn cost
-            res = simulate(model, requests, strat, cache_budget, B,
-                           skip_attention=True, progress=progress)
+            res = simulate(model, requests, conv_tokens, vocab_size,
+                           strat, cache_budget, B, skip_attention=True, progress=progress)
             for i, entry in enumerate(res["per_request"]):
                 entry["time_s"] += attn_costs[i]
             res["total_time"] = sum(e["time_s"] for e in res["per_request"])
