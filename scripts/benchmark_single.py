@@ -32,7 +32,6 @@ from spase_cache.strategies import checkpoint_positions
 log = logging.getLogger(__name__)
 
 def _save_results(path, data):
-    print(data)
     path.write_text(json.dumps(data, indent=2))
 
 @hydra.main(config_path=r'../conf', config_name='config', version_base="1.3")

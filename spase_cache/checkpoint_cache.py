@@ -88,8 +88,15 @@ def prefill_from_checkpoint(
     store: PrefixCheckpointStore,
     max_chunk: int = 4096,
 ) -> tuple[torch.Tensor, Qwen3_5DynamicCache]:
-    """
-        Resume prefill from best GDN checkpoint, computing only the tail tokens.
+    """Resume prefill from best GDN checkpoint, recomputing full model for tail.
+
+    To produce GDN input at layer i, we need attention output at layer i-1.
+    Attention output requires Q (from current hidden states), not just cached
+    K,V.  So all FFNs and attention must recompute from the checkpoint/last kv
+    onward. 
+   
+    Therefore: full model runs from checkpoint position m to seq_len.
+    If no GDN checkpoint exists, this is equivalent to no_cache.
     """
     from spase_cache.utils import _model_device, _get_linear_layers, _get_attention_layers, prefill_baseline, chunked_prefill
 
@@ -103,10 +110,7 @@ def prefill_from_checkpoint(
     ckpt = store.best_checkpoint(seq_len)
 
     if ckpt is None:
-        # No GDN checkpoints — must recompute all GDN layers from scratch.
-        # KV cache cannot reduce HF prefill without a custom attention kernel
-        # (HF appends new KV on each forward, so pre-filling KV + passing all
-        # tokens doubles the sequence length seen by attention).
+        # No GDN checkpoint — must recompute everything from scratch.
         return prefill_baseline(model, input_ids)
 
     resume_pos = ckpt.position
@@ -129,7 +133,9 @@ def prefill_from_checkpoint(
     # Verify token match
     assert torch.equal(store.prefix_tokens[0, :resume_pos], input_ids[0, :resume_pos].cpu())
 
-    # Build cache with restored states (moves tensors to model device)
+    # Build cache with restored GDN states + KV up to checkpoint position.
+    # Full model runs from resume_pos onward: all layers (GDN, attention, FFN)
+    # must recompute because each layer's output feeds into the next.
     cache = Qwen3_5DynamicCache(config=config)
     for li in linear_layers:
         if li in ckpt.recurrent_states:
@@ -141,8 +147,7 @@ def prefill_from_checkpoint(
             cache.key_cache[li] = store.kv_cache_keys[li][:, :, :resume_pos, :].to(device)
             cache.value_cache[li] = store.kv_cache_values[li][:, :, :resume_pos, :].to(device)
 
-
-    # Process remaining tokens
+    # Recompute full model for tail tokens
     return chunked_prefill(model, input_ids, resume_pos, cache, max_chunk=max_chunk)
 
 # ---------------------------------------------------------------------------
