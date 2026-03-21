@@ -145,6 +145,53 @@ def _get_attention_layers(config: Qwen3_5TextConfig) -> list[int]:
     return [i for i, lt in enumerate(config.layer_types) if lt == "full_attention"]
 
 
+def gdn_checkpoint_bytes(config: Qwen3_5TextConfig) -> int:
+    """Bytes for one GDN checkpoint (all linear-attention layers in one group).
+
+    Per layer: recurrent state n_v * d_h * d_h  +  conv state n_v * d_h * (K-1).
+    Summed over all linear-attention layers.
+    Formula from README: 3 * n_v * d_h^2 (dominant term, ignoring conv).
+    """
+    n_v = config.linear_num_value_heads
+    d_h = config.linear_value_head_dim
+    k = config.linear_conv_kernel_dim
+    n_linear = len(_get_linear_layers(config))
+    elem = 2 if str(config.torch_dtype) in ("float16", "torch.float16", "bfloat16", "torch.bfloat16") else 4
+    rec_elems = n_v * d_h * d_h
+    conv_elems = n_v * d_h * (k - 1)
+    return n_linear * (rec_elems + conv_elems) * elem
+
+
+def kv_per_token_bytes(config: Qwen3_5TextConfig) -> int:
+    """Bytes of attention KV cache per token (all attention layers in one group).
+
+    Per layer per token: 2 * n_kv * d_a (key + value).
+    """
+    n_kv = config.num_key_value_heads
+    d_a = config.head_dim
+    n_attn = len(_get_attention_layers(config))
+    elem = 2 if str(config.torch_dtype) in ("float16", "torch.float16", "bfloat16", "torch.bfloat16") else 4
+    return n_attn * 2 * n_kv * d_a * elem
+
+
+def compute_r(config: Qwen3_5TextConfig) -> float:
+    """Ratio of per-checkpoint GDN size to per-token KV size.
+
+    r = gdn_checkpoint_bytes / kv_per_token_bytes.
+    From README: r = 3 * n_v * d_h^2 / (2 * n_kv * d_a)  (element-count ratio,
+    same as byte ratio since both use the same dtype).
+    For 0.8B: r=768, for 27B: r=4608.
+    """
+    ckpt_b = gdn_checkpoint_bytes(config)
+    kv_b = kv_per_token_bytes(config)
+    return ckpt_b / kv_b
+
+
+def max_checkpoints_for_budget(config: Qwen3_5TextConfig, gdn_budget_bytes: int) -> int:
+    """Maximum number of GDN checkpoints that fit in a given byte budget."""
+    return gdn_budget_bytes // gdn_checkpoint_bytes(config)
+
+
 def make_model_config(cfg) -> Qwen3_5TextConfig:
     return Qwen3_5TextConfig(
         vocab_size=cfg.model.vocab_size,

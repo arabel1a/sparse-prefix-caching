@@ -15,4 +15,7 @@ data:
 benchmark_baselines:
   seq_lens: [128, 256, 512, 1024]
 
+benchmark_e2e:
+  kv_budget_gb: 0.1
+  gdn_budget_gb: 0.1
 

@@ -30,7 +30,7 @@ from spase_cache.utils import (
     PrefixCache,
     _save_jsonl,
 )
-from spase_cache.strategies import checkpoint_positions
+from spase_cache.strategies import checkpoint_positions, HistogramTracker
 
 log = logging.getLogger(__name__)
 
@@ -97,16 +97,50 @@ def interleave(requests, seed):
     return ordered
 
 
+def _is_histogram_strategy(tag):
+    return tag in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay")
+
+
+def _make_histogram_tracker(strategy, max_len):
+    """Create a HistogramTracker for histogram-based strategies.
+
+    Budget M (per-sequence checkpoint count) is read from strategy.n_blocks.
+    """
+    tag = strategy.tag
+    mode = {'histogram_frozen': 'frozen',
+            'histogram_periodic': 'periodic',
+            'histogram_exp_decay': 'exp_decay'}[tag]
+    budget = strategy.n_blocks
+    log.info("histogram %s: budget=%d checkpoints, max_len=%d", tag, budget, max_len)
+    gamma = strategy.get('gamma', 0.99)
+    replan_interval = strategy.get('replan_interval', 100)
+    return HistogramTracker(max_len, budget, mode=mode,
+                            gamma=gamma, replan_interval=replan_interval)
+
+
+def _get_overlap_depth(cache, conv_id, turn, seq_len):
+    """Get the overlap depth for a request (how many prefix tokens are cached)."""
+    cached_store, _ = cache.find_best_prefix(conv_id, turn)
+    if cached_store is not None:
+        return min(cached_store.kv_len, seq_len), cached_store
+    return 0, None
+
+
 def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
-                 kv_budget, gdn_budget, cache=None, progress=False):
+                 kv_budget, gdn_budget, cache=None, progress=False,
+                 histogram_tracker=None):
     """Run requests through the model to fill the cache, without timing.
 
     For no_cache strategy, still runs prefill_baseline on all train requests
     so that MPS/CUDA caches and memory allocators are fully warmed before
     the timed evaluation phase.
+
+    For histogram strategies, also observes overlap depths and builds the
+    histogram. Returns (cache, histogram_tracker).
     """
     dev = _model_device(model)
     uses_cache = strategy.tag != "no_cache"
+    is_hist = _is_histogram_strategy(strategy.tag)
     if cache is None:
         cache = PrefixCache(kv_budget, gdn_budget)
 
@@ -114,30 +148,46 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
         all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
         input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
         seq_len = input_ids.shape[1]
-        cached_store, _ = cache.find_best_prefix(conv_id, turn)
+
+        # Observe overlap depth for histogram strategies
+        overlap_depth, cached_store = _get_overlap_depth(cache, conv_id, turn, seq_len)
+        if is_hist and histogram_tracker is not None:
+            histogram_tracker.observe(overlap_depth)
+
         if cached_store is not None:
             prefill_from_checkpoint(model, input_ids, cached_store)
         else:
             prefill_baseline(model, input_ids)
         _sync_device(dev)
-        positions = checkpoint_positions(seq_len, **strategy)
+        positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
         store = prefill_and_capture_at(model, input_ids, positions)
         _sync_device(dev)
         store.to("cpu")
         cache.put((conv_id, turn), store)
+
+    # For frozen mode, solve DP once after all warmup data
+    if is_hist and histogram_tracker is not None and strategy.tag == 'histogram_frozen':
+        histogram_tracker.freeze()
+
     return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
 
 
 def simulate(model, requests, conv_tokens, vocab_size, strategy,
-             kv_budget, gdn_budget, cache=None, progress=False):
+             kv_budget, gdn_budget, cache=None, progress=False,
+             histogram_tracker=None):
     """Run all requests through the model with given caching strategy.
 
     KV cache and GDN checkpoints have separate budgets. KV cache alone cannot
     skip compute (attention needs Q from GDN FFN hidden states), but is required
     so attention can attend to history without re-encoding old tokens.
+
+    For histogram_periodic/histogram_exp_decay, continues observing overlaps
+    and replanning during the test phase.
     """
     dev = _model_device(model)
     uses_cache = strategy.tag != "no_cache"
+    is_hist = _is_histogram_strategy(strategy.tag)
+    online_hist = is_hist and strategy.tag != 'histogram_frozen'
     if cache is None and uses_cache:
         cache = PrefixCache(kv_budget, gdn_budget)
     per_request = []
@@ -156,6 +206,11 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
 
         if uses_cache:
             cached_store, _ = cache.find_best_prefix(conv_id, turn)
+
+        # Observe overlap for online histogram strategies
+        if online_hist and histogram_tracker is not None:
+            overlap = min(cached_store.kv_len, seq_len) if cached_store else 0
+            histogram_tracker.observe(overlap)
 
         if cached_store is not None:
             hit = True
@@ -180,7 +235,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         # Capture checkpoints for cache (or dummy forward to keep device warm)
         capture_s = 0.0
         if uses_cache:
-            positions = checkpoint_positions(seq_len, **strategy)
+            positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
             _sync_device(dev)
             cap_t0 = time.perf_counter()
             store = prefill_and_capture_at(model, input_ids, positions)
@@ -208,6 +263,31 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         "cache_entries": cache.n_entries if cache else 0,
         "per_request": per_request,
     }
+
+
+def run_strategy(model, strat, train_requests, test_requests,
+                 conv_tokens, vocab_size, kv_budget, gdn_budget,
+                 max_seq_len, progress):
+    """Run a single strategy end-to-end. All caches are local and freed on return."""
+    hist_tracker = None
+    if _is_histogram_strategy(strat.tag):
+        hist_tracker = _make_histogram_tracker(strat, max_seq_len)
+
+    log.info("Strategy: %s — warming cache on train split...", strat.tag)
+    cache = warmup_cache(model, train_requests, conv_tokens, vocab_size,
+                         strat, kv_budget, gdn_budget, progress=progress,
+                         histogram_tracker=hist_tracker)
+    log.info("Strategy: %s — evaluating on test split...", strat.tag)
+    res = simulate(model, test_requests, conv_tokens, vocab_size,
+                   strat, kv_budget, gdn_budget, cache=cache, progress=progress,
+                   histogram_tracker=hist_tracker)
+
+    log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",
+             strat.tag, res["total_time"], res["total_capture_time"], res["wall_time"])
+    if res["hits"] > 0:
+        log.info("    hits: %d/%d (%.1f%%)",
+                 res["hits"], len(test_requests), res["hits"] / len(test_requests) * 100)
+    return res
 
 
 @hydra.main(config_path=r"../conf", config_name="config", version_base="1.3")
@@ -264,18 +344,9 @@ def main(cfg: DictConfig):
 
 
     for strat in strategies:
-        log.info("Strategy: %s — warming cache on train split...", strat.tag)
-        cache = warmup_cache(model, train_requests, conv_tokens, vocab_size,
-                             strat, kv_budget, gdn_budget, progress=progress)
-        log.info("Strategy: %s — evaluating on test split...", strat.tag)
-        res = simulate(model, test_requests, conv_tokens, vocab_size,
-                       strat, kv_budget, gdn_budget, cache=cache, progress=progress)
-
-        log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",
-                 strat.tag, res["total_time"], res["total_capture_time"], res["wall_time"])
-        if res["hits"] > 0:
-            log.info("    hits: %d/%d (%.1f%%)",
-                     res["hits"], len(test_requests), res["hits"] / len(test_requests) * 100)
+        res = run_strategy(model, strat, train_requests, test_requests,
+                           conv_tokens, vocab_size, kv_budget, gdn_budget,
+                           cfg.data.max_seq_len, progress)
 
         _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
         summary["strategies"][strat.tag] = {

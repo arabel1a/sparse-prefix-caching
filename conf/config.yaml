@@ -71,6 +71,33 @@ strategies:
     linewidth: 2
     startat: 768
 
+  - tag: "histogram_frozen"
+    n_blocks: 1
+    name: "DP-optimal (frozen)"
+    color: "tab:purple"
+    marker: "X"
+    linestyle: "-"
+    linewidth: 2
+
+  - tag: "histogram_periodic"
+    n_blocks: 1
+    name: "DP-optimal (periodic H=100)"
+    color: "tab:brown"
+    marker: "P"
+    linestyle: "--"
+    linewidth: 2
+    replan_interval: 100
+
+  - tag: "histogram_exp_decay"
+    n_blocks: 1
+    name: "DP-optimal (exp decay γ=0.99)"
+    color: "tab:olive"
+    marker: "*"
+    linestyle: "--"
+    linewidth: 2
+    gamma: 0.99
+    replan_interval: 100
+
 
 # Qwen3.5-0.8B dimensions
 model:
