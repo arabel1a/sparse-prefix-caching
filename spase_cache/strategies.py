@@ -15,7 +15,6 @@ STRATEGIES = [
     "histogram_frozen",
     "histogram_periodic",
     "histogram_exp_decay",
-    "histogram_mutual",
 ]
 
 def balanced_positions(seq_len, block_size=None, n_blocks=None):
@@ -140,8 +139,8 @@ class HistogramTracker:
         self._positions = None  # cached DP solution (in token positions)
         self._dirty = True
 
-    def observe(self, overlap_depth, seq_len=None):
-        """Record an observed overlap depth. seq_len is ignored (used by MutualTracker)."""
+    def observe(self, overlap_depth):
+        """Record an observed overlap depth."""
         b = min(_bin_index(max(int(overlap_depth), 0), self.bin_size),
                 len(self.counts) - 1)
         if self.mode == 'exp_decay':
@@ -180,110 +179,6 @@ class HistogramTracker:
         self.mode = 'frozen'
 
 
-class HistogramMutualTracker:
-    """Tracks joint (length, overlap) distribution for length-aware checkpointing.
-
-    Bins sequences by length. Each length bin maintains its own overlap histogram.
-    The checkpoint budget for each length bin scales linearly:
-        budget(L) = max(1, round(n_blocks * L / max_len))
-    so short sequences get fewer checkpoints than long ones.
-    """
-
-    def __init__(self, max_len, budget, mode='frozen', gamma=0.99,
-                 replan_interval=100, bin_size=1):
-        self.max_len = max_len
-        self.budget = budget  # budget at max_len
-        self.mode = mode
-        self.gamma = gamma
-        self.replan_interval = replan_interval
-        self.bin_size = max(1, bin_size)
-
-        self.n_overlap_bins = max_len // self.bin_size + 1
-        self.n_len_bins = max_len // self.bin_size + 1
-        # counts[len_bin][overlap_bin]
-        self.counts = np.zeros((self.n_len_bins, self.n_overlap_bins), dtype=np.float64)
-        self.n_obs = 0
-        # Cache DP solutions per length bin: len_bin -> list of token positions
-        self._solutions = {}
-        self._dirty_bins = set()
-
-    def _len_bin(self, seq_len):
-        return min(_bin_index(seq_len, self.bin_size), self.n_len_bins - 1)
-
-    def _overlap_bin(self, depth):
-        return min(_bin_index(max(int(depth), 0), self.bin_size),
-                   self.n_overlap_bins - 1)
-
-    def _budget_for_len(self, seq_len):
-        """Scale budget linearly with sequence length."""
-        return max(1, round(self.budget * seq_len / self.max_len))
-
-    def observe(self, overlap_depth, seq_len=None):
-        """Record an observed (overlap_depth, seq_len) pair."""
-        if seq_len is None:
-            seq_len = self.max_len
-        lb = self._len_bin(seq_len)
-        ob = self._overlap_bin(overlap_depth)
-        if self.mode == 'exp_decay':
-            self.counts[lb] *= self.gamma
-        self.counts[lb, ob] += 1.0
-        self.n_obs += 1
-        self._dirty_bins.add(lb)
-
-    def _solve_bin(self, lb):
-        """Solve DP for a single length bin."""
-        hist = self.counts[lb]
-        representative_len = (lb + 1) * self.bin_size
-        budget = self._budget_for_len(representative_len)
-        bin_positions = solve_dp(hist, budget)
-        positions = [_bin_to_pos(b, self.bin_size) for b in bin_positions]
-        self._solutions[lb] = positions
-        return positions
-
-    def solve(self):
-        """Solve DP for all length bins that have data."""
-        for lb in range(self.n_len_bins):
-            if self.counts[lb].sum() > 0:
-                self._solve_bin(lb)
-        self._dirty_bins.clear()
-        n_solved = len(self._solutions)
-        log.info("Mutual DP solved: %d length bins, n_obs=%d, bin_size=%d",
-                 n_solved, self.n_obs, self.bin_size)
-        for lb, pos in sorted(self._solutions.items()):
-            if pos:
-                log.info("  len_bin %d (≤%d tok): %d ckpts, positions=%s",
-                         lb, (lb + 1) * self.bin_size, len(pos), pos)
-
-    def get_positions(self, seq_len):
-        """Get checkpoint positions for a request of given length."""
-        lb = self._len_bin(seq_len)
-
-        should_solve = False
-        if lb not in self._solutions:
-            should_solve = True
-        elif self.mode == 'frozen':
-            pass
-        elif self.mode in ('periodic', 'exp_decay'):
-            if lb in self._dirty_bins and self.n_obs % self.replan_interval == 0:
-                should_solve = True
-
-        if should_solve:
-            if self.mode == 'frozen' and not self._solutions:
-                # First call after freeze — solve all bins at once
-                self.solve()
-            else:
-                self._solve_bin(lb)
-                self._dirty_bins.discard(lb)
-
-        positions = self._solutions.get(lb, [])
-        return [p for p in positions if 0 < p <= seq_len]
-
-    def freeze(self):
-        """Solve all bins and freeze."""
-        self.solve()
-        self.mode = 'frozen'
-
-
 def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start_at=0, skip=0,
                          histogram_tracker=None, **_ignored):
     """Return list of positions where GDN checkpoints should be captured.
@@ -302,8 +197,7 @@ def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start
         return sqrt_positions(seq_len)
     if type in ("log", "dyadic", "diadic"):
         return diadic_positions(seq_len, start_at)
-    if type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay",
-                 "histogram_mutual"):
+    if type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
         if histogram_tracker is None:
             raise ValueError(f"Strategy type {type} requires a histogram_tracker")
         return histogram_tracker.get_positions(seq_len)

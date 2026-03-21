@@ -23,21 +23,20 @@ data:
   train_frac: 0.5   # fraction of requests used for cache warmup (train); rest is test
 
 strategies:
+  # Defaults (in code): linestyle="-", linewidth=2, bin_size=1, gamma=0.99, replan_interval=100
+  # Only specify when overriding.
+
   - tag: "no_cache"
     type: "no_cache"
     label: "No caching"
     color: "black"
     marker: "o"
-    linestyle: "-"
-    linewidth: 2
 
   - tag: "kv_only"
     type: "kv_only"
     label: "KV cache only"
     color: "tab:red"
     marker: "s"
-    linestyle: "-"
-    linewidth: 2
 
   - tag: "block_768"
     type: "balanced_fix_blocksize"
@@ -45,7 +44,6 @@ strategies:
     label: "Block (B=768)"
     color: "tab:blue"
     marker: "^"
-    linestyle: "-"
     linewidth: 1.5
 
   - tag: "balanced_1"
@@ -54,7 +52,6 @@ strategies:
     label: "Balanced (1 block)"
     color: "tab:cyan"
     marker: "D"
-    linestyle: "-"
     linewidth: 1.5
     skip: 768
 
@@ -64,8 +61,6 @@ strategies:
 #     label: "Sqrt"
 #     color: "tab:green"
 #     marker: "p"
-#     linestyle: "-"
-#     linewidth: 2
 #     skip: 768 * 768
 #
   - tag: "log_768"
@@ -73,8 +68,6 @@ strategies:
     label: "Logarithmic (starting at 768)"
     color: "tab:orange"
     marker: "v"
-    linestyle: "-"
-    linewidth: 2
     startat: 768
 
   - tag: "hist_frozen"
@@ -84,8 +77,6 @@ strategies:
     label: "DP-optimal (frozen)"
     color: "tab:purple"
     marker: "X"
-    linestyle: "-"
-    linewidth: 2
 
   - tag: "hist_periodic"
     type: "histogram_periodic"
@@ -95,8 +86,6 @@ strategies:
     color: "tab:brown"
     marker: "P"
     linestyle: "--"
-    linewidth: 2
-    replan_interval: 100
 
   - tag: "hist_exp_decay"
     type: "histogram_exp_decay"
@@ -106,19 +95,6 @@ strategies:
     color: "tab:olive"
     marker: "*"
     linestyle: "--"
-    linewidth: 2
-    gamma: 0.99
-    replan_interval: 100
-
-  - tag: "hist_mutual"
-    type: "histogram_mutual"
-    n_blocks: 1
-    label: "DP-optimal (joint len+overlap)"
-    color: "tab:pink"
-    marker: "d"
-    linestyle: "-"
-    linewidth: 2
-    bin_size: 128
 
 
 # Qwen3.5-0.8B dimensions

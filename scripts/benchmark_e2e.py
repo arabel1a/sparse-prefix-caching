@@ -30,7 +30,7 @@ from spase_cache.utils import (
     PrefixCache,
     _save_jsonl,
 )
-from spase_cache.strategies import checkpoint_positions, HistogramTracker, HistogramMutualTracker
+from spase_cache.strategies import checkpoint_positions, HistogramTracker
 
 log = logging.getLogger(__name__)
 
@@ -98,28 +98,19 @@ def interleave(requests, seed):
 
 
 def _is_histogram_strategy(stype):
-    return stype in ("histogram_frozen", "histogram_periodic",
-                     "histogram_exp_decay", "histogram_mutual")
+    return stype in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay")
 
 
 def _make_histogram_tracker(strategy, max_len):
-    """Create a HistogramTracker (or HistogramMutualTracker) from strategy config."""
+    """Create a HistogramTracker from strategy config."""
     stype = strategy.type
+    mode = {'histogram_frozen': 'frozen',
+            'histogram_periodic': 'periodic',
+            'histogram_exp_decay': 'exp_decay'}[stype]
     budget = strategy.n_blocks
     gamma = strategy.get('gamma', 0.99)
     replan_interval = strategy.get('replan_interval', 100)
     bin_size = strategy.get('bin_size', 1)
-
-    if stype == 'histogram_mutual':
-        mode = strategy.get('mode', 'frozen')
-        log.info("histogram_mutual %s: budget=%d, bin_size=%d, max_len=%d, mode=%s",
-                 strategy.tag, budget, bin_size, max_len, mode)
-        return HistogramMutualTracker(max_len, budget, mode=mode, gamma=gamma,
-                                      replan_interval=replan_interval, bin_size=bin_size)
-
-    mode = {'histogram_frozen': 'frozen',
-            'histogram_periodic': 'periodic',
-            'histogram_exp_decay': 'exp_decay'}[stype]
     log.info("histogram %s [%s]: budget=%d, bin_size=%d, max_len=%d",
              strategy.tag, stype, budget, bin_size, max_len)
     return HistogramTracker(max_len, budget, mode=mode, gamma=gamma,
@@ -160,7 +151,7 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
         # Observe overlap depth for histogram strategies
         overlap_depth, cached_store = _get_overlap_depth(cache, conv_id, turn, seq_len)
         if is_hist and histogram_tracker is not None:
-            histogram_tracker.observe(overlap_depth, seq_len=seq_len)
+            histogram_tracker.observe(overlap_depth)
 
         if cached_store is not None:
             prefill_from_checkpoint(model, input_ids, cached_store)
@@ -175,7 +166,7 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
 
     # For frozen mode, solve DP once after all warmup data
     if is_hist and histogram_tracker is not None:
-        if strategy.type in ('histogram_frozen', 'histogram_mutual'):
+        if strategy.type == 'histogram_frozen':
             histogram_tracker.freeze()
 
     return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
@@ -196,7 +187,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
     dev = _model_device(model)
     uses_cache = strategy.type != "no_cache"
     is_hist = _is_histogram_strategy(strategy.type)
-    online_hist = is_hist and strategy.type not in ('histogram_frozen', 'histogram_mutual')
+    online_hist = is_hist and strategy.type != 'histogram_frozen'
     if cache is None and uses_cache:
         cache = PrefixCache(kv_budget, gdn_budget)
     per_request = []
@@ -219,7 +210,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         # Observe overlap for online histogram strategies
         if online_hist and histogram_tracker is not None:
             overlap = min(cached_store.kv_len, seq_len) if cached_store else 0
-            histogram_tracker.observe(overlap, seq_len=seq_len)
+            histogram_tracker.observe(overlap)
 
         if cached_store is not None:
             hit = True
