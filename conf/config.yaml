@@ -19,6 +19,7 @@ data:
   min_seq_len: 768   # all strategies are anyway disabled for too short promts -- waste of compute for experiments
   max_rounds: 36 # there are few sequences of very many rounds (up to 800), which bloats the number of requests (quadratic amount of total token). I filter 95th percentile
   max_rows: 1000000
+  interleave: true  # interleave conversations with Poisson arrivals for realistic cache miss patterns
  
 strategies:
   - tag: "no_cache"
@@ -108,4 +109,4 @@ prepare_data:
   tokenizer_chunk_size: 2048
 
 plot_results:
-  _target_: plot_results.plot_all  # or plot_results.plot_overlap, plot_results.plot_baselines, etc.
+  _target_: plot_results.plot_all  # or plot_results.plot_single, plot_results.plot_tradeoff, plot_results.plot_e2e, plot_results.plot_overlap

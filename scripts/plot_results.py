@@ -5,8 +5,8 @@ Usage (hydra):
   python plot_results.py output_dir=path/to/run plot._target_=plot_results.plot_overlap
 
 The plot._target_ selects which plot function to call.
-Available targets: plot_results.plot_all (default), plot_results.plot_baselines,
-                   plot_results.plot_e2e, plot_results.plot_overlap
+Available targets: plot_results.plot_all (default), plot_results.plot_single,
+                   plot_results.plot_e2e, plot_results.plot_overlap, plot_results.plot_tradeoff
 """
 import json
 import logging
@@ -44,7 +44,7 @@ def _spec(key, style_map):
 # ---------------------------------------------------------------------------
 # Baselines plot
 # ---------------------------------------------------------------------------
-def plot_baselines(out_dir, root_dir=None, style_map=None, **_kw):
+def plot_single(out_dir, root_dir=None, style_map=None, **_kw):
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
     path = root_dir / "benchmark_single" / "baselines_results.json"
@@ -179,7 +179,7 @@ def plot_baselines(out_dir, root_dir=None, style_map=None, **_kw):
     ax2.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
 
     plt.tight_layout()
-    out = out_dir / "benchmark_baselines.png"
+    out = out_dir / "benchmark_single.png"
     plt.savefig(out, dpi=200, bbox_inches="tight")
     print(f"  saved {out}")
     plt.close()
@@ -370,12 +370,63 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
 
 
 # ---------------------------------------------------------------------------
+# Speedup vs cache size trade-off
+# ---------------------------------------------------------------------------
+def plot_tradeoff(out_dir, root_dir=None, style_map=None, **_kw):
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    path = root_dir / "benchmark_single" / "baselines_results.json"
+    if not path.exists():
+        print(f"  skipping tradeoff plot ({path} not found)")
+        return
+
+    data = json.loads(path.read_text())
+    seq_lens = np.array(data["seq_lens"], dtype=float)
+    strategies = data["strategies"]
+    model_name = data["model_name"]
+
+    if "no_cache" not in strategies:
+        print("  skipping tradeoff plot (no_cache baseline missing)")
+        return
+
+    baseline_times = np.array(strategies["no_cache"]["times_s"])
+    to_mb = lambda a: np.array(a) / 1024 / 1024
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    for key in strategies:
+        if key == "no_cache":
+            continue
+        label, color, marker, ls, lw = _spec(key, style_map)
+        times = np.array(strategies[key]["times_s"])
+        speedup = np.mean(baseline_times / np.maximum(times, 1e-12))
+        cache_mb = np.mean(to_mb(strategies[key]["cache_bytes"]))
+        ax.scatter(cache_mb, speedup, s=120, color=color, marker=marker,
+                   zorder=3, edgecolors="black", linewidths=0.5)
+        ax.annotate(label, (cache_mb, speedup), textcoords="offset points",
+                    xytext=(8, 4), fontsize=8)
+
+    ax.set_xlabel("Mean cache size (MB, single layer group)")
+    ax.set_ylabel("Mean speedup vs no-cache")
+    ax.set_title(f"Speedup vs cache size trade-off — {model_name}")
+    ax.grid(True, alpha=0.3)
+    ax.set_xscale("log", base=2)
+
+    plt.tight_layout()
+    out = out_dir / "tradeoff.png"
+    plt.savefig(out, dpi=200, bbox_inches="tight")
+    print(f"  saved {out}")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
 def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
-    plot_baselines(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_single(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_tradeoff(out_dir, root_dir=root_dir, style_map=style_map)
     plot_e2e(out_dir, root_dir=root_dir, style_map=style_map)
     plot_overlap(out_dir, root_dir=root_dir)
 

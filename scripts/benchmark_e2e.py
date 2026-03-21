@@ -117,6 +117,8 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         hit = False
         tokens_saved = 0
         cached_store = None
+        reusable_kv = 0
+        reusable_gdn = 0
 
         if uses_cache:
             cached_store, _ = cache.find_best_prefix(conv_id, turn)
@@ -129,9 +131,11 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
             _sync_device(dev)
             dt = time.perf_counter() - t0
             kv_len = min(cached_store.kv_len, seq_len)
+            reusable_kv = kv_len
             ckpt = cached_store.best_checkpoint(min(kv_len, seq_len))
             if ckpt:
                 tokens_saved = ckpt.position
+                reusable_gdn = ckpt.position
         else:
             _sync_device(dev)
             t0 = time.perf_counter()
@@ -149,6 +153,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         per_request.append({
             "conv_id": str(conv_id), "turn": turn, "seq_len": seq_len,
             "time_s": dt, "hit": hit, "tokens_saved": tokens_saved,
+            "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
         })
 
     return {

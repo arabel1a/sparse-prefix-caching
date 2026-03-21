@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
-from spase_cache.utils import setup_output_dir
+from spase_cache.utils import setup_output_dir, interleave
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +127,13 @@ def compute_overlap(out_dir, full_cfg, **_kw):
     iter_urls = user_rows["url"].to_list()
     iter_msg_indices = user_rows["message_index"].to_list()
     del user_rows, df
+
+    requests = list(zip(iter_urls, iter_msg_indices))
+    if full_cfg.data.get("interleave", False):
+        log.info("Interleaving requests with Poisson arrivals (seed=%d)...", full_cfg.seed)
+        requests = interleave(requests, full_cfg.seed)
+        iter_urls = [r[0] for r in requests]
+        iter_msg_indices = [r[1] for r in requests]
 
     seen = set()
     lcp_lengths = []

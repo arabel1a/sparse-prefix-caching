@@ -8,10 +8,11 @@ import shutil
 import json
 import logging
 import time
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
 import torch
 from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5TextConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DynamicCache, Qwen3_5TextModel
@@ -22,6 +23,42 @@ from spase_cache.checkpoint_cache import (
 )
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Request interleaving
+# ---------------------------------------------------------------------------
+def interleave(requests, seed):
+    """Interleave conversations with Poisson arrival times, preserving turn order.
+
+    Simulates concurrent load: crowdsourced timestamps almost never overlap,
+    leading to trivial 100% cache hits. Interleaving with exponential
+    inter-arrival times produces realistic cache miss patterns.
+
+    Args:
+        requests: list of tuples where first element is conversation id.
+        seed: random seed for reproducibility.
+    """
+    by_conv = defaultdict(list)
+    for req in requests:
+        by_conv[req[0]].append(req)
+
+    rng = np.random.RandomState(seed)
+    conv_ids = list(by_conv.keys())
+    rng.shuffle(conv_ids)
+
+    queues = {cid: list(by_conv[cid]) for cid in conv_ids}
+    arrival = {cid: rng.exponential(1.0) for cid in conv_ids}
+    ordered = []
+    while queues:
+        cid = min(queues, key=lambda c: arrival[c])
+        ordered.append(queues[cid].pop(0))
+        if queues[cid]:
+            arrival[cid] += rng.exponential(1.0)
+        else:
+            del queues[cid]
+            del arrival[cid]
+    return ordered
 
 
 # ---------------------------------------------------------------------------
