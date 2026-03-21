@@ -103,6 +103,12 @@ def tokenize(out_dir, full_cfg, **_kw):
     log.info(f"Saved {len(df)} messages to {prepared_path}")
 
 
+def train_test_split(requests, train_frac):
+    """Split requests into train (first train_frac) and test (the rest)."""
+    n_train = int(len(requests) * train_frac)
+    return requests[:n_train], requests[n_train:]
+
+
 def compute_overlap(out_dir, full_cfg, **_kw):
     """Load tokenized parquet and compute prefix overlap distribution."""
     out_dir = Path(out_dir)
@@ -132,17 +138,32 @@ def compute_overlap(out_dir, full_cfg, **_kw):
     if full_cfg.data.get("interleave", False):
         log.info("Interleaving requests with Poisson arrivals (seed=%d)...", full_cfg.seed)
         requests = interleave(requests, full_cfg.seed)
-        iter_urls = [r[0] for r in requests]
-        iter_msg_indices = [r[1] for r in requests]
+
+    train_requests, test_requests = train_test_split(
+        requests, full_cfg.data.get("train_frac", 0.5))
+    log.info("Train: %d requests, Test: %d requests", len(train_requests), len(test_requests))
 
     seen = set()
-    lcp_lengths = []
 
-    log.info("Simulating non-deleting prefix cache...")
-    for url, msg_idx in tqdm(
-        zip(iter_urls, iter_msg_indices),
-        total=len(iter_urls),
-    ):
+    # warm cache with train split
+    log.info("Warming prefix cache with train split...")
+    for url, msg_idx in tqdm(train_requests, desc="train"):
+        msg_indices, token_lists = conv_tokens[url]
+        n_msgs = 0
+        for mi in msg_indices:
+            n_msgs += 1
+            if mi == msg_idx:
+                break
+        h = 0
+        for tokens in token_lists[:n_msgs]:
+            for t in tokens:
+                h = (h * _HASH_PRIME + int(t) + 1) & _HASH_MASK
+                seen.add(h)
+
+    # evaluate on test split
+    lcp_lengths = []
+    log.info("Simulating non-deleting prefix cache on test split...")
+    for url, msg_idx in tqdm(test_requests, desc="test"):
         msg_indices, token_lists = conv_tokens[url]
         n_msgs = 0
         for mi in msg_indices:
@@ -168,12 +189,13 @@ def compute_overlap(out_dir, full_cfg, **_kw):
     overlap_path = out_dir / "overlap_lcp.json"
     overlap_path.write_text(json.dumps({
         "lcp_lengths": lcp_lengths,
-        "n_requests": len(iter_urls),
+        "n_requests": len(test_requests),
+        "n_train_requests": len(train_requests),
         "n_conversations": n_conversations,
     }))
 
     n_hits = sum(1 for l in lcp_lengths if l > 0)
-    log.info(f"{n_hits}/{len(lcp_lengths)} requests had cache hits "
+    log.info(f"{n_hits}/{len(lcp_lengths)} test requests had cache hits "
              f"({n_hits/len(lcp_lengths)*100:.1f}%)")
     log.info(f"Overlap results saved to {overlap_path}")
 

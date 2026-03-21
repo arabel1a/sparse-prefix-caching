@@ -21,6 +21,7 @@ from spase_cache.checkpoint_cache import (
 )
 from spase_cache.utils import (
     setup_output_dir,
+    interleave as _interleave_util,
     make_model,
     prefill_baseline,
     _model_device,
@@ -96,8 +97,39 @@ def interleave(requests, seed):
     return ordered
 
 
+def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
+                 kv_budget, gdn_budget, cache=None, progress=False):
+    """Run requests through the model to fill the cache, without timing.
+
+    For no_cache strategy, still runs prefill_baseline on all train requests
+    so that MPS/CUDA caches and memory allocators are fully warmed before
+    the timed evaluation phase.
+    """
+    dev = _model_device(model)
+    uses_cache = strategy.tag != "no_cache"
+    if cache is None:
+        cache = PrefixCache(kv_budget, gdn_budget)
+
+    for conv_id, turn, n_msgs in tqdm(requests, desc=f"{strategy.tag} warmup", disable=not progress):
+        all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
+        input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
+        seq_len = input_ids.shape[1]
+        cached_store, _ = cache.find_best_prefix(conv_id, turn)
+        if cached_store is not None:
+            prefill_from_checkpoint(model, input_ids, cached_store)
+        else:
+            prefill_baseline(model, input_ids)
+        _sync_device(dev)
+        positions = checkpoint_positions(seq_len, **strategy)
+        store = prefill_and_capture_at(model, input_ids, positions)
+        _sync_device(dev)
+        store.to("cpu")
+        cache.put((conv_id, turn), store)
+    return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
+
+
 def simulate(model, requests, conv_tokens, vocab_size, strategy,
-             kv_budget, gdn_budget, progress=False):
+             kv_budget, gdn_budget, cache=None, progress=False):
     """Run all requests through the model with given caching strategy.
 
     KV cache and GDN checkpoints have separate budgets. KV cache alone cannot
@@ -106,8 +138,10 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
     """
     dev = _model_device(model)
     uses_cache = strategy.tag != "no_cache"
-    cache = PrefixCache(kv_budget, gdn_budget) if uses_cache else None
+    if cache is None and uses_cache:
+        cache = PrefixCache(kv_budget, gdn_budget)
     per_request = []
+    wall_t0 = time.perf_counter()
 
     for conv_id, turn, n_msgs in tqdm(requests, desc=strategy.tag, disable=not progress):
         all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
@@ -143,21 +177,31 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
             _sync_device(dev)
             dt = time.perf_counter() - t0
 
-        # Capture checkpoints for cache
+        # Capture checkpoints for cache (or dummy forward to keep device warm)
+        capture_s = 0.0
         if uses_cache:
             positions = checkpoint_positions(seq_len, **strategy)
+            _sync_device(dev)
+            cap_t0 = time.perf_counter()
             store = prefill_and_capture_at(model, input_ids, positions)
+            _sync_device(dev)
+            capture_s = time.perf_counter() - cap_t0
             store.to("cpu")
             cache.put((conv_id, turn), store)
+        _sync_device(dev)
 
         per_request.append({
             "conv_id": str(conv_id), "turn": turn, "seq_len": seq_len,
-            "time_s": dt, "hit": hit, "tokens_saved": tokens_saved,
+            "time_s": dt, "capture_s": capture_s, "hit": hit,
+            "tokens_saved": tokens_saved,
             "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
         })
 
+    wall_time = time.perf_counter() - wall_t0
     return {
         "total_time": sum(e["time_s"] for e in per_request),
+        "total_capture_time": sum(e["capture_s"] for e in per_request),
+        "wall_time": wall_time,
         "hits": sum(1 for e in per_request if e["hit"]),
         "tokens_saved": sum(e["tokens_saved"] for e in per_request),
         "tokens_total": sum(e["seq_len"] for e in per_request),
@@ -166,7 +210,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
     }
 
 
-@hydra.main(config_path="../conf", config_name="config", version_base="1.3")
+@hydra.main(config_path=r"../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     out_dir = setup_output_dir(cfg, "benchmark_e2e")
     model = make_model(cfg)
@@ -183,45 +227,61 @@ def main(cfg: DictConfig):
     requests = interleave(requests, cfg.seed)
     vocab_size = config.vocab_size
 
+    # Train/test split
+    train_frac = cfg.data.get("train_frac", 0.5)
+    n_train = int(len(requests) * train_frac)
+    train_requests = requests[:n_train]
+    test_requests = requests[n_train:]
+
     total_tokens = sum(
         sum(len(t) for t in conv_tokens[url][:n_msgs])
-        for url, _, n_msgs in requests
+        for url, _, n_msgs in test_requests
     )
-    log.info("Total requests: %d, tokens: %d, KV budget: %.1f GB, GDN budget: %.1f GB",
-             len(requests), total_tokens, e2e.kv_budget_gb, e2e.gdn_budget_gb)
-
-    # Warmup
-    log.info("Warming up...")
-    dummy = torch.randint(0, config.vocab_size, (1, 512)).to(dev)
-    for _ in range(3):
-        prefill_baseline(model, dummy)
-    _sync_device(dev)
+    log.info("Train: %d, Test: %d requests, test tokens: %d, KV budget: %.1f GB, GDN budget: %.1f GB",
+             len(train_requests), len(test_requests), total_tokens,
+             e2e.kv_budget_gb, e2e.gdn_budget_gb)
 
     from omegaconf import OmegaConf
     summary = {
         "model_name": cfg.model.name,
-        "n_requests": len(requests),
+        "n_train_requests": len(train_requests),
+        "n_test_requests": len(test_requests),
         "total_tokens": total_tokens,
+        "train_frac": train_frac,
         "kv_budget_gb": e2e.kv_budget_gb,
         "gdn_budget_gb": e2e.gdn_budget_gb,
         "strategies": {},
         "strategy_styles": OmegaConf.to_container(cfg.strategies, resolve=True),
     }
     summary_path = out_dir / "e2e_summary.json"
+    
+    # initial warmup to allevaite gpu clock control, etc
+    print("Warming up cores")
+    cache = warmup_cache(model, train_requests[:e2e.warmup_seqs], conv_tokens, vocab_size,
+                   strategies[0], kv_budget, gdn_budget, progress=progress)
+    simulate(model, test_requests[:e2e.warmup_seqs], conv_tokens, vocab_size,
+                    strategies[0], kv_budget, gdn_budget, cache=cache, progress=progress)
+
 
     for strat in strategies:
-        log.info("Strategy: %s", strat.tag)
-        res = simulate(model, requests, conv_tokens, vocab_size,
-                       strat, kv_budget, gdn_budget, progress=progress)
+        log.info("Strategy: %s — warming cache on train split...", strat.tag)
+        cache = warmup_cache(model, train_requests, conv_tokens, vocab_size,
+                             strat, kv_budget, gdn_budget, progress=progress)
+        log.info("Strategy: %s — evaluating on test split...", strat.tag)
+        res = simulate(model, test_requests, conv_tokens, vocab_size,
+                       strat, kv_budget, gdn_budget, cache=cache, progress=progress)
 
-        log.info("  %s: total=%.1fs", strat.tag, res["total_time"])
+        log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",
+                 strat.tag, res["total_time"], res["total_capture_time"], res["wall_time"])
         if res["hits"] > 0:
             log.info("    hits: %d/%d (%.1f%%)",
-                     res["hits"], len(requests), res["hits"] / len(requests) * 100)
+                     res["hits"], len(test_requests), res["hits"] / len(test_requests) * 100)
 
         _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
         summary["strategies"][strat.tag] = {
             "total_time": res["total_time"],
+            "total_capture_time": res["total_capture_time"],
+            "wall_time": res["wall_time"],
             "hits": res["hits"],
             "tokens_saved": res["tokens_saved"],
             "tokens_total": res["tokens_total"],

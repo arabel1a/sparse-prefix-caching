@@ -6,6 +6,7 @@ Results saved to baselines_results.json.
 import spase_cache
 import json
 import logging
+import time
 
 import torch
 import hydra
@@ -48,8 +49,10 @@ def main(cfg: DictConfig):
 
     all_tags = [s.tag for s in strategies]
     results = {t: [] for t in all_tags}
+    capture_times = {t: [] for t in all_tags}
     cache_sizes = {t: [] for t in all_tags}
     completed_seq_lens = []
+    wall_t0 = time.perf_counter()
 
     out_path = out_dir / "baselines_results.json"
     model_params = OmegaConf.to_container(cfg.model, resolve=True)
@@ -77,6 +80,7 @@ def main(cfg: DictConfig):
         input_ids = torch.randint(0, config.vocab_size, (1, N)).to(dev)
         t_full = time_fn(n_runs, dev, prefill_baseline, model, input_ids)
         times = {"no_cache": t_full}
+        cap_times = {"no_cache": 0.0}
         bytes_map = {"no_cache": 0}
 
         # Checkpoint strategies: always include KV cache
@@ -85,7 +89,11 @@ def main(cfg: DictConfig):
                 continue
 
             positions = checkpoint_positions(N, **strat)
+            _sync_device(dev)
+            cap_t0 = time.perf_counter()
             store = prefill_and_capture_at(model, input_ids, positions)
+            _sync_device(dev)
+            cap_times[strat.tag] = time.perf_counter() - cap_t0
             bytes_map[strat.tag] = store.memory_bytes()
             store.to("cpu")
 
@@ -96,18 +104,21 @@ def main(cfg: DictConfig):
 
         for t in all_tags:
             results[t].append(times.get(t, 0))
+            capture_times[t].append(cap_times.get(t, 0.0))
             cache_sizes[t].append(bytes_map.get(t, 0))
 
         completed_seq_lens.append(N)
 
         parts = [f"N={N:5d}"]
         for t in all_tags:
-            parts.append(f"{t} {times.get(t, 0)*1000:7.1f}ms")
+            parts.append(f"{t} {times.get(t, 0)*1000:7.1f}ms cap={cap_times.get(t, 0)*1000:5.1f}ms")
         log.info(" | ".join(parts))
+        wall_time = time.perf_counter() - wall_t0
         _save_results(out_path, {
             "model_name": cfg.model.name,
             "seq_lens": completed_seq_lens,
-            "strategies": {t: {"times_s": results[t], "cache_bytes": cache_sizes[t]} for t in all_tags},
+            "wall_time": wall_time,
+            "strategies": {t: {"times_s": results[t], "capture_times_s": capture_times[t], "cache_bytes": cache_sizes[t]} for t in all_tags},
             "model_params": model_params,
             "strategy_styles": strategy_styles,
         })

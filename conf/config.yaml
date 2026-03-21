@@ -20,7 +20,8 @@ data:
   max_rounds: 36 # there are few sequences of very many rounds (up to 800), which bloats the number of requests (quadratic amount of total token). I filter 95th percentile
   max_rows: 1000000
   interleave: true  # interleave conversations with Poisson arrivals for realistic cache miss patterns
- 
+  train_frac: 0.5   # fraction of requests used for cache warmup (train); rest is test
+
 strategies:
   - tag: "no_cache"
     name: "No caching"
@@ -105,6 +106,7 @@ benchmark_baselines:
 benchmark_e2e:
   kv_budget_gb: 5.0
   gdn_budget_gb: 5.0
+  warmup_seqs: 1000
   progress: true
 
 overlap_distribution:

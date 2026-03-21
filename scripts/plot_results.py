@@ -306,7 +306,7 @@ def plot_e2e(out_dir, root_dir=None, style_map=None, **_kw):
         t_base = summary["strategies"]["no_cache"]["total_time"]
     else:
         t_base = None
-    n_req = summary["n_requests"]
+    n_req = summary.get("n_test_requests", summary.get("n_requests", 1))
 
     print(f"\n  {'Strategy':<20} {'Time (s)':>10} {'Speedup':>8} {'Hit rate':>10} {'GDN saved':>10}")
     print(f"  {'-'*60}")
@@ -334,7 +334,7 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
 
     data = json.loads(path.read_text())
     lcp = np.array(data["lcp_lengths"])
-    n_total = data["n_requests"]
+    n_total = data.get("n_requests", data.get("n_test_requests", len(lcp)))
     n_conversations = data["n_conversations"]
     lcp_pos = lcp[lcp > 0]
 
