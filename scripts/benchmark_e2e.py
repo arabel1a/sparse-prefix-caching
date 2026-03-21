@@ -97,8 +97,8 @@ def interleave(requests, seed):
     return ordered
 
 
-def _is_histogram_strategy(tag):
-    return tag in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay")
+def _is_histogram_strategy(stype):
+    return stype in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay")
 
 
 def _make_histogram_tracker(strategy, max_len):
@@ -106,12 +106,13 @@ def _make_histogram_tracker(strategy, max_len):
 
     Budget M (per-sequence checkpoint count) is read from strategy.n_blocks.
     """
-    tag = strategy.tag
+    stype = strategy.type
     mode = {'histogram_frozen': 'frozen',
             'histogram_periodic': 'periodic',
-            'histogram_exp_decay': 'exp_decay'}[tag]
+            'histogram_exp_decay': 'exp_decay'}[stype]
     budget = strategy.n_blocks
-    log.info("histogram %s: budget=%d checkpoints, max_len=%d", tag, budget, max_len)
+    log.info("histogram %s [%s]: budget=%d checkpoints, max_len=%d",
+             strategy.tag, stype, budget, max_len)
     gamma = strategy.get('gamma', 0.99)
     replan_interval = strategy.get('replan_interval', 100)
     return HistogramTracker(max_len, budget, mode=mode,
@@ -139,8 +140,8 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
     histogram. Returns (cache, histogram_tracker).
     """
     dev = _model_device(model)
-    uses_cache = strategy.tag != "no_cache"
-    is_hist = _is_histogram_strategy(strategy.tag)
+    uses_cache = strategy.type != "no_cache"
+    is_hist = _is_histogram_strategy(strategy.type)
     if cache is None:
         cache = PrefixCache(kv_budget, gdn_budget)
 
@@ -166,8 +167,10 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
         cache.put((conv_id, turn), store)
 
     # For frozen mode, solve DP once after all warmup data
-    if is_hist and histogram_tracker is not None and strategy.tag == 'histogram_frozen':
+    if is_hist and histogram_tracker is not None and strategy.type == 'histogram_frozen':
         histogram_tracker.freeze()
+        log.info("histogram_frozen [%s]: optimal positions = %s",
+                 strategy.tag, histogram_tracker._positions)
 
     return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
 
@@ -185,9 +188,9 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
     and replanning during the test phase.
     """
     dev = _model_device(model)
-    uses_cache = strategy.tag != "no_cache"
-    is_hist = _is_histogram_strategy(strategy.tag)
-    online_hist = is_hist and strategy.tag != 'histogram_frozen'
+    uses_cache = strategy.type != "no_cache"
+    is_hist = _is_histogram_strategy(strategy.type)
+    online_hist = is_hist and strategy.type != 'histogram_frozen'
     if cache is None and uses_cache:
         cache = PrefixCache(kv_budget, gdn_budget)
     per_request = []
@@ -270,7 +273,7 @@ def run_strategy(model, strat, train_requests, test_requests,
                  max_seq_len, progress):
     """Run a single strategy end-to-end. All caches are local and freed on return."""
     hist_tracker = None
-    if _is_histogram_strategy(strat.tag):
+    if _is_histogram_strategy(strat.type):
         hist_tracker = _make_histogram_tracker(strat, max_seq_len)
 
     log.info("Strategy: %s — warming cache on train split...", strat.tag)

@@ -1,6 +1,9 @@
 """Caching strategy for prefix checkpoint evaluation."""
+import logging
 import math
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 STRATEGIES = [
     "no_cache",
@@ -158,6 +161,8 @@ class HistogramTracker:
         """Solve DP on current histogram and cache the result."""
         self._positions = solve_dp(self.counts, self.budget)
         self._dirty = False
+        log.info("DP solved: %d checkpoints, n_obs=%d, positions=%s",
+                 len(self._positions), self.n_obs, self._positions)
 
     def get_positions(self, seq_len):
         """Get checkpoint positions for a request of given length.
@@ -186,25 +191,26 @@ class HistogramTracker:
         self.mode = 'frozen'
 
 
-def checkpoint_positions(seq_len, *, tag, block_size=None, n_blocks=None, start_at=0, skip=0,
+def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start_at=0, skip=0,
                          histogram_tracker=None, **_ignored):
     """Return list of positions where GDN checkpoints should be captured.
 
+    Dispatches on `type` (the strategy type), not `tag` (the unique ID).
     Accepts the full strategy config dict as kwargs
     (e.g. ``checkpoint_positions(seq_len, **strategy)``).
     """
-    if tag in ("no_cache", "kv_only") or seq_len < skip:
+    if type in ("no_cache", "kv_only") or seq_len < skip:
         return []
-    if tag in ("block", "balanced_fix_blocksize"):
+    if type in ("block", "balanced_fix_blocksize"):
         return balanced_positions(seq_len, block_size=block_size)
-    if tag == "balanced_fix_nblocks":
+    if type == "balanced_fix_nblocks":
         return balanced_positions(seq_len, n_blocks=n_blocks)
-    if tag == "sqrt":
+    if type == "sqrt":
         return sqrt_positions(seq_len)
-    if tag in ("log", "dyadic", "diadic"):
+    if type in ("log", "dyadic", "diadic"):
         return diadic_positions(seq_len, start_at)
-    if tag in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
+    if type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
         if histogram_tracker is None:
-            raise ValueError(f"Strategy {tag} requires a histogram_tracker")
+            raise ValueError(f"Strategy type {type} requires a histogram_tracker")
         return histogram_tracker.get_positions(seq_len)
-    raise ValueError(f"Unknown strategy: {tag}")
+    raise ValueError(f"Unknown strategy type: {type}")

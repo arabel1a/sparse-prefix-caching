@@ -24,30 +24,34 @@ data:
 
 strategies:
   - tag: "no_cache"
-    name: "No caching"
+    type: "no_cache"
+    label: "No caching"
     color: "black"
     marker: "o"
     linestyle: "-"
     linewidth: 2
 
   - tag: "kv_only"
-    name: "KV cache only"
+    type: "kv_only"
+    label: "KV cache only"
     color: "tab:red"
     marker: "s"
     linestyle: "-"
     linewidth: 2
 
-  - tag: "balanced_fix_blocksize"
+  - tag: "block_768"
+    type: "balanced_fix_blocksize"
     block_size: 768
-    name: "Block (B=768)"
+    label: "Block (B=768)"
     color: "tab:blue"
     marker: "^"
     linestyle: "-"
     linewidth: 1.5
 
-  - tag: "balanced_fix_nblocks"
+  - tag: "balanced_1"
+    type: "balanced_fix_nblocks"
     n_blocks: 1
-    name: "Balanced (4 blocks)"
+    label: "Balanced (1 block)"
     color: "tab:cyan"
     marker: "D"
     linestyle: "-"
@@ -56,41 +60,46 @@ strategies:
 
     # skipped: i cant afford such context lengths
 #   - tag: "sqrt"
-#     name: "Sqrt"
+#     type: "sqrt"
+#     label: "Sqrt"
 #     color: "tab:green"
 #     marker: "p"
 #     linestyle: "-"
 #     linewidth: 2
 #     skip: 768 * 768
-# 
-  - tag: "diadic"
-    name: "Logarithmic (starting at 768)"
+#
+  - tag: "log_768"
+    type: "diadic"
+    label: "Logarithmic (starting at 768)"
     color: "tab:orange"
     marker: "v"
     linestyle: "-"
     linewidth: 2
     startat: 768
 
-  - tag: "histogram_frozen"
+  - tag: "hist_frozen"
+    type: "histogram_frozen"
     n_blocks: 1
-    name: "DP-optimal (frozen)"
+    label: "DP-optimal (frozen)"
     color: "tab:purple"
     marker: "X"
     linestyle: "-"
     linewidth: 2
 
-  - tag: "histogram_periodic"
+  - tag: "hist_periodic"
+    type: "histogram_periodic"
     n_blocks: 1
-    name: "DP-optimal (periodic H=100)"
+    label: "DP-optimal (periodic H=100)"
     color: "tab:brown"
     marker: "P"
     linestyle: "--"
     linewidth: 2
     replan_interval: 100
 
-  - tag: "histogram_exp_decay"
+  - tag: "hist_exp_decay"
+    type: "histogram_exp_decay"
     n_blocks: 1
-    name: "DP-optimal (exp decay γ=0.99)"
+    label: "DP-optimal (exp decay γ=0.99)"
     color: "tab:olive"
     marker: "*"
     linestyle: "--"

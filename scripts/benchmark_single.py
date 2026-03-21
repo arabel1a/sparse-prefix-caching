@@ -85,9 +85,9 @@ def main(cfg: DictConfig):
 
         # Checkpoint strategies: always include KV cache
         for strat in strategies:
-            if strat.tag == "no_cache":
+            if strat.type == "no_cache":
                 continue
-            if strat.tag.startswith("histogram_"):
+            if strat.type.startswith("histogram_"):
                 continue  # histogram strategies need trace data, skip in single-seq benchmark
 
             positions = checkpoint_positions(N, **strat)

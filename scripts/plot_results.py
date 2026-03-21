@@ -26,7 +26,7 @@ def _build_style_map(strategies_cfg):
     out = {}
     for s in strategies_cfg:
         out[s.tag] = (
-            s.name,
+            s.label,
             s.color,
             s.marker,
             s.get("linestyle", "-"),
@@ -82,24 +82,24 @@ def plot_single(out_dir, root_dir=None, style_map=None, **_kw):
     flop_per_tok = flop_ga_linear + flop_gdn_recompute
 
     # Theoretical FLOPs per strategy — keyed by tag
+    styles = data.get("strategy_styles", [])
+    styles_by_tag = {s["tag"]: s for s in styles}
     theo = {}
-    theo['no_cache'] = N_arr * flop_per_tok + N_arr**2 * flop_ga_quad_per_tok
-    theo['kv_only'] = N_arr * flop_gdn_recompute
-    # For block-based strategies, need block_size from the strategy config
     for tag in strategies:
-        if tag in theo:
-            continue
-        # Try to find block_size from strategy_styles saved in data
-        styles = data.get("strategy_styles", [])
-        s_cfg = next((s for s in styles if s["tag"] == tag), {})
-        if s_cfg.get("block_size"):
+        s_cfg = styles_by_tag.get(tag, {})
+        stype = s_cfg.get("type", tag)  # fallback for old data without type
+        if stype == "no_cache":
+            theo[tag] = N_arr * flop_per_tok + N_arr**2 * flop_ga_quad_per_tok
+        elif stype == "kv_only":
+            theo[tag] = N_arr * flop_gdn_recompute
+        elif s_cfg.get("block_size"):
             B = s_cfg["block_size"]
             n_tail = N_arr % B
             theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
-        elif tag in ("diadic", "dyadic"):
+        elif stype in ("diadic", "dyadic", "log"):
             n_tail = N_arr - 2.0 ** np.floor(np.log2(N_arr))
             theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
-        elif tag == "sqrt":
+        elif stype == "sqrt":
             n_tail = N_arr % np.floor(np.sqrt(N_arr)).astype(int)
             theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
 
@@ -119,21 +119,21 @@ def plot_single(out_dir, root_dir=None, style_map=None, **_kw):
     per_ckpt = gdn_state_per_ckpt + conv_state_per_ckpt
 
     theo_cache = {}
-    theo_cache['no_cache'] = np.zeros_like(N_arr)
-    theo_cache['kv_only'] = N_arr * attn_kv_per_token
     for tag in strategies:
-        if tag in theo_cache:
-            continue
-        styles = data.get("strategy_styles", [])
-        s_cfg = next((s for s in styles if s["tag"] == tag), {})
-        if s_cfg.get("block_size"):
+        s_cfg = styles_by_tag.get(tag, {})
+        stype = s_cfg.get("type", tag)
+        if stype == "no_cache":
+            theo_cache[tag] = np.zeros_like(N_arr)
+        elif stype == "kv_only":
+            theo_cache[tag] = N_arr * attn_kv_per_token
+        elif s_cfg.get("block_size"):
             B = s_cfg["block_size"]
             n_ckpts = np.floor(N_arr / B)
             theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
-        elif tag in ("diadic", "dyadic"):
+        elif stype in ("diadic", "dyadic", "log"):
             n_ckpts = np.floor(np.log2(N_arr)) + 1
             theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
-        elif tag == "sqrt":
+        elif stype == "sqrt":
             n_ckpts = np.floor(np.sqrt(N_arr))
             theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
 
@@ -308,17 +308,18 @@ def plot_e2e(out_dir, root_dir=None, style_map=None, **_kw):
         t_base = None
     n_req = summary.get("n_test_requests", summary.get("n_requests", 1))
 
-    print(f"\n  {'Strategy':<20} {'Time (s)':>10} {'Speedup':>8} {'Hit rate':>10} {'GDN saved':>10}")
-    print(f"  {'-'*60}")
+    print(f"\n  {'Strategy':<30} {'Time (s)':>10} {'Speedup':>8} {'Hit rate':>10} {'GDN saved':>10}")
+    print(f"  {'-'*70}")
     for strat in report:
         s = summary["strategies"].get(strat, {})
+        label = _spec(strat, style_map)[0]
         t = s.get("total_time", 0)
         speedup = t_base / t if t_base and t > 0 else 0
         has_cache = strat != "no_cache"
         hit_rate = s.get("hits", 0) / n_req * 100 if has_cache else 0
         tok_total = s.get("tokens_total", 1)
         tok_saved = s.get("tokens_saved", 0) / tok_total * 100 if has_cache and tok_total > 0 else 0
-        print(f"  {strat:<20} {t:>10.1f} {speedup:>7.2f}x {hit_rate:>9.1f}% {tok_saved:>9.1f}%")
+        print(f"  {label:<30} {t:>10.1f} {speedup:>7.2f}x {hit_rate:>9.1f}% {tok_saved:>9.1f}%")
 
 
 # ---------------------------------------------------------------------------
