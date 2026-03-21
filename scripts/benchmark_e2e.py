@@ -100,7 +100,6 @@ def interleave(requests, seed):
 def _is_histogram_strategy(stype):
     return stype in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay")
 
-
 def _make_histogram_tracker(strategy, max_len):
     """Create a HistogramTracker from strategy config."""
     stype = strategy.type

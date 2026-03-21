@@ -31,9 +31,8 @@ def diadic_positions(seq_len: int, start_at) -> list[int]:
     positions = []
     i = 0
     while (1 << i) <= seq_len:
-        if (1 << i) < start_at:
-            continue
-        positions.append(1 << i)
+        if (1 << i) >= start_at:
+            positions.append(1 << i)
         i += 1
     return positions
 
@@ -158,12 +157,19 @@ class HistogramTracker:
                  len(self._positions), self.n_obs, self.bin_size, self._positions)
 
     def get_positions(self, seq_len):
-        """Get checkpoint positions for a request of given length."""
+        """Get checkpoint positions for a request of given length.
+
+        Always includes seq_len itself (checkpoint at end of sequence),
+        matching what balanced strategies do for free.
+        For frozen mode, defers DP solve until freeze() is called.
+        """
         should_solve = False
         if self._positions is None:
+            if self.mode == 'frozen':
+                # Don't solve prematurely — use seq_len-only fallback
+                # until freeze() is called with full histogram
+                return [seq_len]
             should_solve = True
-        elif self.mode == 'frozen':
-            pass
         elif self.mode in ('periodic', 'exp_decay'):
             if self._dirty and self.n_obs % self.replan_interval == 0:
                 should_solve = True
@@ -171,7 +177,9 @@ class HistogramTracker:
         if should_solve:
             self.solve()
 
-        return [p for p in self._positions if 0 < p <= seq_len]
+        positions = [p for p in self._positions if 0 < p <= seq_len]
+        positions.append(seq_len)
+        return sorted(set(positions))
 
     def freeze(self):
         """Solve and freeze — no further updates to positions."""
