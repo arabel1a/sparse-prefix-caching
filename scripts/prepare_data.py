@@ -200,10 +200,52 @@ def compute_overlap(out_dir, full_cfg, **_kw):
     log.info(f"Overlap results saved to {overlap_path}")
 
 
+def compute_prefix_sharing(out_dir, full_cfg, n_sample=200, **_kw):
+    """Sample conversations and compute pairwise LCP matrix for trie diagnostics."""
+    out_dir = Path(out_dir)
+    df = pl.read_parquet(full_cfg.data.processed)
+
+    urls = df["url"].unique(maintain_order=True).to_list()
+    rng = np.random.RandomState(full_cfg.seed)
+    if len(urls) > n_sample:
+        urls = rng.choice(urls, n_sample, replace=False).tolist()
+
+    conv_seqs = []
+    conv_lens = []
+    for url in urls:
+        conv = df.filter(pl.col("url") == url).sort("message_index")
+        tokens = np.concatenate([np.array(t, dtype=np.int32) for t in conv["tokens"].to_list()])
+        conv_seqs.append(tokens)
+        conv_lens.append(len(tokens))
+
+    n = len(conv_seqs)
+    lcp_matrix = np.zeros((n, n), dtype=np.int32)
+
+    for i in tqdm(range(n), desc="prefix sharing"):
+        lcp_matrix[i, i] = conv_lens[i]
+        for j in range(i + 1, n):
+            min_len = min(conv_lens[i], conv_lens[j])
+            if min_len == 0:
+                continue
+            matches = conv_seqs[i][:min_len] == conv_seqs[j][:min_len]
+            lcp = int(np.argmin(matches)) if not matches.all() else min_len
+            lcp_matrix[i, j] = lcp
+            lcp_matrix[j, i] = lcp
+
+    sharing_path = out_dir / "prefix_sharing.json"
+    sharing_path.write_text(json.dumps({
+        "lcp_matrix": lcp_matrix.tolist(),
+        "conv_lens": conv_lens,
+        "n_conversations": n,
+    }))
+    log.info("Prefix sharing matrix (%d×%d) saved to %s", n, n, sharing_path)
+
+
 def prepare_all(out_dir, full_cfg, **_kw):
     """Run tokenize then compute_overlap."""
     tokenize(out_dir, full_cfg)
     compute_overlap(out_dir, full_cfg)
+    compute_prefix_sharing(out_dir, full_cfg)
 
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")

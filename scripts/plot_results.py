@@ -421,6 +421,254 @@ def plot_tradeoff(out_dir, root_dir=None, style_map=None, **_kw):
 
 
 # ---------------------------------------------------------------------------
+# Trie diagnostics — 6-panel figure
+# ---------------------------------------------------------------------------
+def plot_trie_diagnostics(out_dir, root_dir=None, style_map=None, **_kw):
+    """Diagnostic plots for understanding prefix trie structure and cache behavior."""
+    from collections import defaultdict
+
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping trie diagnostics ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    strat_keys = list(summary["strategies"].keys())
+
+    per_request = {}
+    for strat in strat_keys:
+        jsonl = data_dir / f"e2e_{strat}.jsonl"
+        if jsonl.exists():
+            per_request[strat] = _load_jsonl(jsonl)
+    if not per_request:
+        print("  no JSONL files found, skipping trie diagnostics")
+        return
+
+    # Pick a reference strategy with cache for overlap distribution
+    ref_strat = None
+    for s in strat_keys:
+        if s != "no_cache" and s in per_request:
+            if "balanced" in s or "block" in s:
+                ref_strat = s
+                break
+    if ref_strat is None:
+        ref_strat = next(s for s in strat_keys if s != "no_cache" and s in per_request)
+    ref = per_request[ref_strat]
+
+    fig = plt.figure(figsize=(21, 18))
+    gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.3)
+    axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(3)])
+
+    # ---- Panel (0,0): Overlap depth histogram ----
+    ax = axes[0, 0]
+    overlaps = np.array([d["reusable_kv"] for d in ref])
+    hit_overlaps = overlaps[overlaps > 0]
+    if len(hit_overlaps):
+        ax.hist(hit_overlaps, bins=60, color="steelblue", alpha=0.7, edgecolor="white")
+        ax.axvline(np.median(hit_overlaps), color="red", ls="--", lw=1.5,
+                   label=f"median = {np.median(hit_overlaps):.0f}")
+        ax.axvline(np.mean(hit_overlaps), color="orange", ls="--", lw=1.5,
+                   label=f"mean = {np.mean(hit_overlaps):.0f}")
+        ax.legend(fontsize=8)
+    miss_frac = (overlaps == 0).sum() / len(overlaps)
+    ax.set_xlabel("Overlap depth (tokens)")
+    ax.set_ylabel("Count")
+    ax.set_title(f"Overlap distribution (hits only, {miss_frac:.0%} misses hidden)")
+
+    # ---- Panel (0,1): Overlap depth vs seq_len scatter ----
+    ax = axes[0, 1]
+    seq_lens = np.array([d["seq_len"] for d in ref])
+    hits_mask = np.array([d["hit"] for d in ref])
+    max_val = max(seq_lens.max(), overlaps.max()) * 1.05
+    ax.plot([0, max_val], [0, max_val], "k--", alpha=0.3, lw=1, label="overlap = seq_len")
+    ax.scatter(seq_lens[~hits_mask], overlaps[~hits_mask], s=4, alpha=0.2,
+               color="gray", label=f"miss ({(~hits_mask).sum()})", rasterized=True)
+    ax.scatter(seq_lens[hits_mask], overlaps[hits_mask], s=4, alpha=0.3,
+               color="steelblue", label=f"hit ({hits_mask.sum()})", rasterized=True)
+    ax.set_xlabel("Sequence length (tokens)")
+    ax.set_ylabel("Overlap depth (tokens)")
+    ax.set_title("Overlap depth vs sequence length")
+    ax.legend(fontsize=8)
+
+    # ---- Panel (0,2): Token savings CDF ----
+    ax = axes[0, 2]
+    report = [s for s in strat_keys if s in per_request and s != "no_cache"]
+    for s in report:
+        label, color, marker, ls, lw = _spec(s, style_map)
+        saved = np.sort([d["reusable_gdn"] for d in per_request[s]])
+        cdf = np.arange(1, len(saved) + 1) / len(saved)
+        ax.plot(saved, cdf, color=color, ls=ls, lw=max(lw, 1.5), label=label)
+    ax.set_xlabel("GDN tokens reusable per request")
+    ax.set_ylabel("CDF")
+    ax.set_title("Token savings CDF by strategy")
+    ax.legend(fontsize=6, loc="lower right")
+    ax.grid(True, alpha=0.3)
+
+    # ---- Panel (1,0): Per-conversation prefix growth ----
+    ax = axes[1, 0]
+    conv_data = defaultdict(list)
+    for d in ref:
+        conv_data[d["conv_id"]].append((d["turn"], d["seq_len"]))
+
+    max_turn = max(t for entries in conv_data.values() for t, _ in entries)
+    lens_by_turn = [[] for _ in range(max_turn + 1)]
+    for entries in conv_data.values():
+        for t, s in entries:
+            lens_by_turn[t].append(s)
+
+    valid_turns = [t for t in range(max_turn + 1) if len(lens_by_turn[t]) >= 5]
+    if valid_turns:
+        p25 = [np.percentile(lens_by_turn[t], 25) for t in valid_turns]
+        p50 = [np.percentile(lens_by_turn[t], 50) for t in valid_turns]
+        p75 = [np.percentile(lens_by_turn[t], 75) for t in valid_turns]
+        p90 = [np.percentile(lens_by_turn[t], 90) for t in valid_turns]
+        counts = [len(lens_by_turn[t]) for t in valid_turns]
+
+        ax.fill_between(valid_turns, p25, p75, alpha=0.3, color="steelblue", label="25–75th pct")
+        ax.plot(valid_turns, p50, color="steelblue", lw=2, label="median")
+        ax.plot(valid_turns, p90, color="steelblue", ls="--", lw=1, alpha=0.7, label="90th pct")
+
+        ax2_twin = ax.twinx()
+        ax2_twin.bar(valid_turns, counts, alpha=0.12, color="gray")
+        ax2_twin.set_ylabel("# requests at turn", color="gray", fontsize=8)
+        ax2_twin.tick_params(axis="y", labelcolor="gray", labelsize=7)
+
+    ax.set_xlabel("Turn index")
+    ax.set_ylabel("Context length (tokens)")
+    ax.set_title("Context growth per conversation turn")
+    ax.legend(fontsize=8, loc="upper left")
+
+    # ---- Panel (1,1): Cache residency over time ----
+    ax = axes[1, 1]
+    has_cache_field = "n_cache_entries" in ref[0]
+    req_idx = np.arange(len(ref))
+    hits_arr = np.array([d["hit"] for d in ref])
+
+    if has_cache_field:
+        n_entries = [d["n_cache_entries"] for d in ref]
+        ax.plot(req_idx, n_entries, color="steelblue", lw=1, label="cache entries")
+        ax.set_ylabel("Cache entries")
+        # secondary axis: cache memory
+        if "cache_kv_bytes" in ref[0]:
+            ax_mem = ax.twinx()
+            kv_mb = np.array([d["cache_kv_bytes"] for d in ref]) / 1e9
+            gdn_mb = np.array([d["cache_gdn_bytes"] for d in ref]) / 1e9
+            ax_mem.plot(req_idx, kv_mb, color="tab:red", lw=0.8, alpha=0.6, label="KV (GB)")
+            ax_mem.plot(req_idx, gdn_mb, color="tab:green", lw=0.8, alpha=0.6, label="GDN (GB)")
+            ax_mem.set_ylabel("Cache memory (GB)", fontsize=8)
+            ax_mem.legend(fontsize=7, loc="center right")
+    else:
+        cum_hits = np.cumsum(hits_arr)
+        ax.plot(req_idx, cum_hits, color="steelblue", lw=1, label="cumulative hits")
+        ax.set_ylabel("Cumulative hits")
+
+    # Rug plot for hit/miss along bottom
+    for idx in req_idx[hits_arr]:
+        ax.axvline(idx, ymin=0, ymax=0.02, color="green", alpha=0.15, lw=0.3)
+    for idx in req_idx[~hits_arr]:
+        ax.axvline(idx, ymin=0, ymax=0.02, color="red", alpha=0.3, lw=0.3)
+
+    ax.set_xlabel("Request index (green=hit, red=miss)")
+    ax.set_title(f"Cache residency over time ({ref_strat})")
+    ax.legend(fontsize=8, loc="upper left")
+
+    # ---- Panel (1,2): Prefix sharing heatmap ----
+    ax = axes[1, 2]
+    sharing_path = root_dir / "prepare_data" / "prefix_sharing.json"
+    if sharing_path.exists():
+        sharing = json.loads(sharing_path.read_text())
+        lcp_matrix = np.array(sharing["lcp_matrix"], dtype=np.float32)
+        n_convs = len(lcp_matrix)
+
+        # Cluster by similarity
+        try:
+            from scipy.cluster.hierarchy import linkage, leaves_list
+            from scipy.spatial.distance import squareform
+            max_lcp = lcp_matrix.max()
+            dist = max_lcp - lcp_matrix
+            np.fill_diagonal(dist, 0)
+            condensed = squareform(dist, checks=False)
+            Z = linkage(condensed, method="average")
+            order = leaves_list(Z)
+            lcp_matrix = lcp_matrix[np.ix_(order, order)]
+        except ImportError:
+            pass  # plot unsorted if scipy unavailable
+
+        im = ax.imshow(lcp_matrix, cmap="viridis", aspect="auto", interpolation="nearest")
+        plt.colorbar(im, ax=ax, label="LCP (tokens)", shrink=0.8)
+        ax.set_title(f"Pairwise prefix sharing ({n_convs} convs, clustered)")
+        ax.set_xlabel("Conversation")
+        ax.set_ylabel("Conversation")
+    else:
+        ax.text(0.5, 0.5,
+                "prefix_sharing.json not found\n\n"
+                "Run prepare_data with\ncompute_prefix_sharing target",
+                ha="center", va="center", transform=ax.transAxes,
+                fontsize=10, color="gray")
+        ax.set_title("Prefix sharing heatmap")
+
+    # ---- Panel (2,0): Cross-turn hit analysis ----
+    ax = axes[2, 0]
+    has_turn_gap = "turn_gap" in ref[0]
+    if has_turn_gap:
+        gaps = np.array([d["turn_gap"] for d in ref if d["hit"]])
+        consecutive = (gaps == 1).sum()
+        non_consec = (gaps > 1).sum()
+        max_gap = gaps.max() if len(gaps) else 1
+        bins = np.arange(0.5, max_gap + 1.5, 1)
+        ax.hist(gaps, bins=bins, color="steelblue", alpha=0.7, edgecolor="white")
+        ax.set_xlabel("Turn gap (1 = consecutive)")
+        ax.set_ylabel("Count")
+        ax.set_title(f"Hit turn gaps — consecutive: {consecutive}, skip-turn: {non_consec}")
+        # Annotate fractions
+        n_total = len(ref)
+        ax.text(0.97, 0.95,
+                f"consecutive: {consecutive/n_total:.1%} of all\n"
+                f"skip-turn: {non_consec/n_total:.1%} of all",
+                transform=ax.transAxes, ha="right", va="top", fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="wheat", alpha=0.5))
+    else:
+        ax.text(0.5, 0.5, "turn_gap not in data\n(re-run benchmark_e2e)",
+                ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray")
+        ax.set_title("Hit turn gaps")
+
+    # ---- Panel (2,1): Non-consecutive hit overlap distribution ----
+    ax = axes[2, 1]
+    if has_turn_gap:
+        nc_data = [d for d in ref if d["hit"] and d["turn_gap"] > 1]
+        consec_data = [d for d in ref if d["hit"] and d["turn_gap"] == 1]
+        if consec_data:
+            ax.hist([d["reusable_kv"] for d in consec_data], bins=40,
+                    alpha=0.5, color="steelblue", edgecolor="white", label=f"consecutive ({len(consec_data)})")
+        if nc_data:
+            ax.hist([d["reusable_kv"] for d in nc_data], bins=40,
+                    alpha=0.7, color="tab:orange", edgecolor="white", label=f"skip-turn ({len(nc_data)})")
+            nc_kv = [d["reusable_kv"] for d in nc_data]
+            ax.axvline(np.median(nc_kv), color="tab:orange", ls="--", lw=1.5)
+        ax.set_xlabel("Overlap depth (tokens)")
+        ax.set_ylabel("Count")
+        ax.set_title("Overlap by hit type")
+        ax.legend(fontsize=8)
+    else:
+        ax.text(0.5, 0.5, "turn_gap not in data",
+                ha="center", va="center", transform=ax.transAxes, fontsize=10, color="gray")
+        ax.set_title("Overlap by hit type")
+
+    # ---- Panel (2,2): unused ----
+    axes[2, 2].set_visible(False)
+
+    fig.suptitle(f"Prefix trie diagnostics — {model_name}", fontsize=14, y=0.99)
+    out = out_dir / "trie_diagnostics.png"
+    plt.savefig(out, dpi=200, bbox_inches="tight")
+    print(f"  saved {out}")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
 def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
@@ -430,6 +678,7 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_tradeoff(out_dir, root_dir=root_dir, style_map=style_map)
     plot_e2e(out_dir, root_dir=root_dir, style_map=style_map)
     plot_overlap(out_dir, root_dir=root_dir)
+    plot_trie_diagnostics(out_dir, root_dir=root_dir, style_map=style_map)
 
 
 # ---------------------------------------------------------------------------

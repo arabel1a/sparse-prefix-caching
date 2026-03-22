@@ -124,22 +124,32 @@ class HistogramTracker:
     """
 
     def __init__(self, max_len, budget, mode='frozen', gamma=0.99,
-                 replan_interval=100, bin_size=1):
+                 replan_interval=100, bin_size=1, exclude_full_hits=True):
         self.max_len = max_len
         self.budget = budget
         self.mode = mode
         self.gamma = gamma
         self.replan_interval = replan_interval
         self.bin_size = max(1, bin_size)
+        self.exclude_full_hits = exclude_full_hits
 
         n_bins = max_len // self.bin_size + 1
         self.counts = np.zeros(n_bins, dtype=np.float64)
         self.n_obs = 0
+        self.n_skipped_full = 0
         self._positions = None  # cached DP solution (in token positions)
         self._dirty = True
 
-    def observe(self, overlap_depth):
-        """Record an observed overlap depth."""
+    def observe(self, overlap_depth, is_full_hit=False):
+        """Record an observed overlap depth.
+
+        If exclude_full_hits is set and is_full_hit is True, the observation
+        is skipped — full hits are already handled by the seq_len checkpoint
+        and would bias the DP toward high positions.
+        """
+        if self.exclude_full_hits and is_full_hit:
+            self.n_skipped_full += 1
+            return
         b = min(_bin_index(max(int(overlap_depth), 0), self.bin_size),
                 len(self.counts) - 1)
         if self.mode == 'exp_decay':
@@ -153,22 +163,20 @@ class HistogramTracker:
         bin_positions = solve_dp(self.counts, self.budget)
         self._positions = [_bin_to_pos(b, self.bin_size) for b in bin_positions]
         self._dirty = False
-        log.info("DP solved: %d ckpts, n_obs=%d, bin_size=%d, positions=%s",
-                 len(self._positions), self.n_obs, self.bin_size, self._positions)
+        log.info("DP solved: %d ckpts, n_obs=%d (skipped %d full hits), bin_size=%d, positions=%s",
+                 len(self._positions), self.n_obs, self.n_skipped_full,
+                 self.bin_size, self._positions)
 
     def get_positions(self, seq_len):
         """Get checkpoint positions for a request of given length.
 
-        Always includes seq_len itself (checkpoint at end of sequence),
-        matching what balanced strategies do for free.
         For frozen mode, defers DP solve until freeze() is called.
+        Note: save_last is handled by checkpoint_positions(), not here.
         """
         should_solve = False
         if self._positions is None:
             if self.mode == 'frozen':
-                # Don't solve prematurely — use seq_len-only fallback
-                # until freeze() is called with full histogram
-                return [seq_len]
+                return []  # no DP positions yet; save_last handled by caller
             should_solve = True
         elif self.mode in ('periodic', 'exp_decay'):
             if self._dirty and self.n_obs % self.replan_interval == 0:
@@ -177,9 +185,7 @@ class HistogramTracker:
         if should_solve:
             self.solve()
 
-        positions = [p for p in self._positions if 0 < p <= seq_len]
-        positions.append(seq_len)
-        return sorted(set(positions))
+        return [p for p in self._positions if 0 < p <= seq_len]
 
     def freeze(self):
         """Solve and freeze — no further updates to positions."""
@@ -188,25 +194,40 @@ class HistogramTracker:
 
 
 def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start_at=0, skip=0,
-                         histogram_tracker=None, **_ignored):
+                         save_last=False, histogram_tracker=None, **_ignored):
     """Return list of positions where GDN checkpoints should be captured.
 
     Dispatches on `type` (the strategy type), not `tag` (the unique ID).
     Accepts the full strategy config dict as kwargs
     (e.g. ``checkpoint_positions(seq_len, **strategy)``).
+
+    If save_last is True, always includes seq_len as a checkpoint position.
+    This is useful for any strategy: the endpoint checkpoint is "free" in that
+    it guarantees full reuse on consecutive-turn hits.
     """
-    if type in ("no_cache", "kv_only") or seq_len < skip:
+    if type == "no_cache":
         return []
-    if type in ("block", "balanced_fix_blocksize"):
-        return balanced_positions(seq_len, block_size=block_size)
-    if type == "balanced_fix_nblocks":
-        return balanced_positions(seq_len, n_blocks=n_blocks)
-    if type == "sqrt":
-        return sqrt_positions(seq_len)
-    if type in ("log", "dyadic", "diadic"):
-        return diadic_positions(seq_len, start_at)
-    if type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
+
+    positions = []
+    if type == "kv_only":
+        pass  # no GDN checkpoints by default
+    elif seq_len < skip:
+        pass
+    elif type in ("block", "balanced_fix_blocksize"):
+        positions = balanced_positions(seq_len, block_size=block_size)
+    elif type == "balanced_fix_nblocks":
+        positions = balanced_positions(seq_len, n_blocks=n_blocks)
+    elif type == "sqrt":
+        positions = sqrt_positions(seq_len)
+    elif type in ("log", "dyadic", "diadic"):
+        positions = diadic_positions(seq_len, start_at)
+    elif type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
         if histogram_tracker is None:
             raise ValueError(f"Strategy type {type} requires a histogram_tracker")
-        return histogram_tracker.get_positions(seq_len)
-    raise ValueError(f"Unknown strategy type: {type}")
+        positions = histogram_tracker.get_positions(seq_len)
+    else:
+        raise ValueError(f"Unknown strategy type: {type}")
+
+    if save_last and seq_len not in positions:
+        positions.append(seq_len)
+    return sorted(set(positions))

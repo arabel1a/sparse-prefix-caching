@@ -86,16 +86,16 @@ def setup_output_dir(cfg, task: str):
              shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
+    console_level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
 
     file_handler = logging.FileHandler(out_dir / "run.log")
-    file_handler.setLevel(level)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    file_handler.setLevel(logging.INFO)  # always capture INFO+ to file
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
+    console_handler.setLevel(console_level)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
     root = logging.getLogger()
-    root.setLevel(level)
+    root.setLevel(logging.INFO)  # root must be at least as permissive as file handler
     root.addHandler(file_handler)
     root.addHandler(console_handler)
     return out_dir

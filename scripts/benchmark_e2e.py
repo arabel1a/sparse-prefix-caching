@@ -110,10 +110,12 @@ def _make_histogram_tracker(strategy, max_len):
     gamma = strategy.get('gamma', 0.99)
     replan_interval = strategy.get('replan_interval', 100)
     bin_size = strategy.get('bin_size', 1)
-    log.info("histogram %s [%s]: budget=%d, bin_size=%d, max_len=%d",
-             strategy.tag, stype, budget, bin_size, max_len)
+    exclude_full_hits = strategy.get('exclude_full_hits', True)
+    log.info("histogram %s [%s]: budget=%d, bin_size=%d, max_len=%d, exclude_full=%s",
+             strategy.tag, stype, budget, bin_size, max_len, exclude_full_hits)
     return HistogramTracker(max_len, budget, mode=mode, gamma=gamma,
-                            replan_interval=replan_interval, bin_size=bin_size)
+                            replan_interval=replan_interval, bin_size=bin_size,
+                            exclude_full_hits=exclude_full_hits)
 
 
 def _get_overlap_depth(cache, conv_id, turn, seq_len):
@@ -150,7 +152,8 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
         # Observe overlap depth for histogram strategies
         overlap_depth, cached_store = _get_overlap_depth(cache, conv_id, turn, seq_len)
         if is_hist and histogram_tracker is not None:
-            histogram_tracker.observe(overlap_depth)
+            full_hit = cached_store is not None and overlap_depth >= cached_store.kv_len
+            histogram_tracker.observe(overlap_depth, is_full_hit=full_hit)
 
         if cached_store is not None:
             prefill_from_checkpoint(model, input_ids, cached_store)
@@ -200,16 +203,18 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
         hit = False
         tokens_saved = 0
         cached_store = None
+        cached_turn = -1
         reusable_kv = 0
         reusable_gdn = 0
 
         if uses_cache:
-            cached_store, _ = cache.find_best_prefix(conv_id, turn)
+            cached_store, cached_turn = cache.find_best_prefix(conv_id, turn)
 
         # Observe overlap for online histogram strategies
         if online_hist and histogram_tracker is not None:
             overlap = min(cached_store.kv_len, seq_len) if cached_store else 0
-            histogram_tracker.observe(overlap)
+            full_hit = cached_store is not None and overlap >= cached_store.kv_len
+            histogram_tracker.observe(overlap, is_full_hit=full_hit)
 
         if cached_store is not None:
             hit = True
@@ -249,6 +254,11 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
             "time_s": dt, "capture_s": capture_s, "hit": hit,
             "tokens_saved": tokens_saved,
             "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
+            "cached_turn": cached_turn,
+            "turn_gap": turn - cached_turn if hit else -1,
+            "n_cache_entries": cache.n_entries if cache else 0,
+            "cache_kv_bytes": cache.kv_used if cache else 0,
+            "cache_gdn_bytes": cache.gdn_used if cache else 0,
         })
 
     wall_time = time.perf_counter() - wall_t0
@@ -284,8 +294,18 @@ def run_strategy(model, strat, train_requests, test_requests,
     log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",
              strat.tag, res["total_time"], res["total_capture_time"], res["wall_time"])
     if res["hits"] > 0:
-        log.info("    hits: %d/%d (%.1f%%)",
-                 res["hits"], len(test_requests), res["hits"] / len(test_requests) * 100)
+        n_test = len(test_requests)
+        n_hits = res["hits"]
+        consecutive = sum(1 for e in res["per_request"] if e["turn_gap"] == 1)
+        non_consecutive = sum(1 for e in res["per_request"] if e["hit"] and e["turn_gap"] > 1)
+        log.info("    hits: %d/%d (%.1f%%) — consecutive: %d (%.1f%%), non-consecutive: %d (%.1f%%)",
+                 n_hits, n_test, n_hits / n_test * 100,
+                 consecutive, consecutive / n_test * 100,
+                 non_consecutive, non_consecutive / n_test * 100)
+        if non_consecutive > 0:
+            nc_kv = [e["reusable_kv"] for e in res["per_request"] if e["hit"] and e["turn_gap"] > 1]
+            log.info("    non-consecutive hit overlap: mean=%.0f, median=%.0f tokens",
+                     np.mean(nc_kv), np.median(nc_kv))
     return res
 
 
