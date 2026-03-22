@@ -1,0 +1,33 @@
+format: revision
+raw_dir: dataset/github
+processed: data/github_${run_name}.parquet
+max_seq_len: 16384
+min_seq_len: 768
+max_revisions: 1000   # max revisions per document
+max_rows: 1000000
+interleave: true
+train_frac: 0.5
+skip_fetch: false
+
+fetch:
+  clone_dir: null      # null = temp dir
+  min_commits: 50
+  max_commits: 1000
+  min_words: 3000
+  targets:
+    - repo: "python/cpython"
+      file: "Lib/test/test_typing.py"
+    - repo: "python/cpython"
+      file: "Lib/test/test_asyncio/test_tasks.py"
+    - repo: "python/cpython"
+      file: "Doc/whatsnew/3.12.rst"
+    - repo: "pandas-dev/pandas"
+      file: "pandas/core/frame.py"
+    - repo: "django/django"
+      file: "django/db/models/query.py"
+    - repo: "rust-lang/rust"
+      file: "compiler/rustc_parse/src/parser/expr.rs"
+    - repo: "torvalds/linux"
+      file: "kernel/sched/fair.c"
+    - repo: "tensorflow/tensorflow"
+      file: "tensorflow/python/ops/math_ops.py"

@@ -1,0 +1,5 @@
+tag: "no_cache"
+type: "no_cache"
+label: "No caching"
+color: "black"
+marker: "o"

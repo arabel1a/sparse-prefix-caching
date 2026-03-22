@@ -17,6 +17,7 @@ from spase_cache.checkpoint_cache import (
 )
 from spase_cache.utils import (
     setup_output_dir,
+    resolve_strategies,
     make_model,
     prefill_baseline,
     _model_device,
@@ -37,6 +38,7 @@ def _save_results(path, data):
 
 @hydra.main(config_path=r'../conf', config_name='config', version_base="1.3")
 def main(cfg: DictConfig):
+    resolve_strategies(cfg)
     out_dir = setup_output_dir(cfg, "benchmark_single")
     model = make_model(cfg)
     dev = _model_device(model)

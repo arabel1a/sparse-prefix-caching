@@ -1,0 +1,8 @@
+tag: "hist_periodic"
+type: "histogram_periodic"
+n_blocks: 1
+bin_size: 128
+label: "DP-optimal (periodic H=100)"
+color: "tab:brown"
+marker: "P"
+linestyle: "--"

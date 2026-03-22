@@ -14,6 +14,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
+from omegaconf import DictConfig, OmegaConf
 from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5TextConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DynamicCache, Qwen3_5TextModel
 
@@ -23,6 +25,51 @@ from spase_cache.checkpoint_cache import (
 )
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Strategy resolution
+# ---------------------------------------------------------------------------
+_STRATEGY_DIR = Path(__file__).resolve().parent.parent / "conf" / "strategy"
+
+
+def resolve_strategies(cfg):
+    """Resolve strategy name list into full strategy configs.
+
+    Each entry in cfg.strategies is either a plain string (strategy name)
+    or a single-key dict {name: {overrides}}.  We load the corresponding
+    YAML from conf/strategy/<name>.yaml and merge overrides on top.
+    """
+    resolved = []
+    for entry in cfg.strategies:
+        if isinstance(entry, str):
+            name, overrides = entry, {}
+        else:
+            # single-key dict: {"hist_frozen": {"n_blocks": 2}}
+            name = list(entry.keys())[0]
+            overrides = dict(entry[name])
+
+        yaml_path = _STRATEGY_DIR / f"{name}.yaml"
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
+
+        with open(yaml_path) as f:
+            base = yaml.safe_load(f)
+        base.update(overrides)
+        resolved.append(base)
+
+    OmegaConf.update(cfg, "strategies", resolved)
+    log.info("resolved %d strategies: %s", len(resolved), [s["tag"] for s in resolved])
+
+
+def build_input_tokens(conv_tokens, conv_id, n_msgs, is_revision=False):
+    """Build the flat token list for a request.
+
+    For conversations: concatenate tokens from turns 0..n_msgs.
+    For revisions: use only the current revision's tokens (each is full document).
+    """
+    if is_revision:
+        return list(conv_tokens[conv_id][n_msgs - 1])
+    return [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
 
 
 # ---------------------------------------------------------------------------

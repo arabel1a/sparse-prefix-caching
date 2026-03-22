@@ -686,7 +686,8 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
 # ---------------------------------------------------------------------------
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    from spase_cache.utils import setup_output_dir
+    from spase_cache.utils import setup_output_dir, resolve_strategies
+    resolve_strategies(cfg)
     root_dir = Path(cfg.output_dir)
     out_dir = setup_output_dir(cfg, "plot_results")
     style_map = _build_style_map(cfg.strategies)

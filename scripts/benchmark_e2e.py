@@ -21,6 +21,8 @@ from spase_cache.checkpoint_cache import (
 )
 from spase_cache.utils import (
     setup_output_dir,
+    resolve_strategies,
+    build_input_tokens,
     interleave as _interleave_util,
     make_model,
     prefill_baseline,
@@ -128,7 +130,7 @@ def _get_overlap_depth(cache, conv_id, turn, seq_len):
 
 def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
                  kv_budget, gdn_budget, cache=None, progress=False,
-                 histogram_tracker=None):
+                 histogram_tracker=None, is_revision=False):
     """Run requests through the model to fill the cache, without timing.
 
     For no_cache strategy, still runs prefill_baseline on all train requests
@@ -145,7 +147,7 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
         cache = PrefixCache(kv_budget, gdn_budget)
 
     for conv_id, turn, n_msgs in tqdm(requests, desc=f"{strategy.tag} warmup", disable=not progress):
-        all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
+        all_toks = build_input_tokens(conv_tokens, conv_id, n_msgs, is_revision)
         input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
         seq_len = input_ids.shape[1]
 
@@ -176,7 +178,7 @@ def warmup_cache(model, requests, conv_tokens, vocab_size, strategy,
 
 def simulate(model, requests, conv_tokens, vocab_size, strategy,
              kv_budget, gdn_budget, cache=None, progress=False,
-             histogram_tracker=None):
+             histogram_tracker=None, is_revision=False):
     """Run all requests through the model with given caching strategy.
 
     KV cache and GDN checkpoints have separate budgets. KV cache alone cannot
@@ -196,7 +198,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
     wall_t0 = time.perf_counter()
 
     for conv_id, turn, n_msgs in tqdm(requests, desc=strategy.tag, disable=not progress):
-        all_toks = [t for toks in conv_tokens[conv_id][:n_msgs] for t in toks]
+        all_toks = build_input_tokens(conv_tokens, conv_id, n_msgs, is_revision)
         input_ids = torch.tensor([all_toks], dtype=torch.long).to(dev) % vocab_size
         seq_len = input_ids.shape[1]
 
@@ -276,7 +278,7 @@ def simulate(model, requests, conv_tokens, vocab_size, strategy,
 
 def run_strategy(model, strat, train_requests, test_requests,
                  conv_tokens, vocab_size, kv_budget, gdn_budget,
-                 max_seq_len, progress):
+                 max_seq_len, progress, is_revision=False):
     """Run a single strategy end-to-end. All caches are local and freed on return."""
     hist_tracker = None
     if _is_histogram_strategy(strat.type):
@@ -285,11 +287,11 @@ def run_strategy(model, strat, train_requests, test_requests,
     log.info("Strategy: %s — warming cache on train split...", strat.tag)
     cache = warmup_cache(model, train_requests, conv_tokens, vocab_size,
                          strat, kv_budget, gdn_budget, progress=progress,
-                         histogram_tracker=hist_tracker)
+                         histogram_tracker=hist_tracker, is_revision=is_revision)
     log.info("Strategy: %s — evaluating on test split...", strat.tag)
     res = simulate(model, test_requests, conv_tokens, vocab_size,
                    strat, kv_budget, gdn_budget, cache=cache, progress=progress,
-                   histogram_tracker=hist_tracker)
+                   histogram_tracker=hist_tracker, is_revision=is_revision)
 
     log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",
              strat.tag, res["total_time"], res["total_capture_time"], res["wall_time"])
@@ -311,6 +313,7 @@ def run_strategy(model, strat, train_requests, test_requests,
 
 @hydra.main(config_path=r"../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
+    resolve_strategies(cfg)
     out_dir = setup_output_dir(cfg, "benchmark_e2e")
     model = make_model(cfg)
     dev = _model_device(model)
@@ -322,6 +325,7 @@ def main(cfg: DictConfig):
     progress = e2e.get("progress", True)
 
     # Load and interleave requests
+    is_rev = cfg.data.get("format", "conversation") == "revision"
     requests, conv_tokens = load_requests(cfg.data.processed)
     requests = interleave(requests, cfg.seed)
     vocab_size = config.vocab_size
@@ -333,7 +337,7 @@ def main(cfg: DictConfig):
     test_requests = requests[n_train:]
 
     total_tokens = sum(
-        sum(len(t) for t in conv_tokens[url][:n_msgs])
+        len(build_input_tokens(conv_tokens, url, n_msgs, is_rev))
         for url, _, n_msgs in test_requests
     )
     log.info("Train: %d, Test: %d requests, test tokens: %d, KV budget: %.1f GB, GDN budget: %.1f GB",
@@ -353,19 +357,19 @@ def main(cfg: DictConfig):
         "strategy_styles": OmegaConf.to_container(cfg.strategies, resolve=True),
     }
     summary_path = out_dir / "e2e_summary.json"
-    
+
     # initial warmup to allevaite gpu clock control, etc
     print("Warming up cores")
     cache = warmup_cache(model, train_requests[:e2e.warmup_seqs], conv_tokens, vocab_size,
-                   strategies[0], kv_budget, gdn_budget, progress=progress)
+                   strategies[0], kv_budget, gdn_budget, progress=progress, is_revision=is_rev)
     simulate(model, test_requests[:e2e.warmup_seqs], conv_tokens, vocab_size,
-                    strategies[0], kv_budget, gdn_budget, cache=cache, progress=progress)
+                    strategies[0], kv_budget, gdn_budget, cache=cache, progress=progress, is_revision=is_rev)
 
 
     for strat in strategies:
         res = run_strategy(model, strat, train_requests, test_requests,
                            conv_tokens, vocab_size, kv_budget, gdn_budget,
-                           cfg.data.max_seq_len, progress)
+                           cfg.data.max_seq_len, progress, is_revision=is_rev)
 
         _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
         summary["strategies"][strat.tag] = {

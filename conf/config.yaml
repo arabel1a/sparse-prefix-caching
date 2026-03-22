@@ -7,92 +7,24 @@ device: mps  # cpu, cuda, mps
 dtype: float16  # enable 2080's tensor cores
 seed: 42
 
+defaults:
+  - data: sharegpt
+  - _self_
+
 hydra:
   run:
     dir: ${output_dir}
   output_subdir: hydra  # saves hydra config into ${output_dir}/hydra/
 
-data:
-  raw_path: data/chatgpt_results_final_language_filtered.csv
-  processed: data/tokenized.parquet
-  max_seq_len: 16384 # maximum request length
-  min_seq_len: 768   # all strategies are anyway disabled for too short sequences -- none of them will trigger and we have just wasted compute. note that it does not drop short prompts -- it only drop entire converstions whose total length is too short
-  max_rounds: 36 # there are few sequences of very many rounds (up to 800), which bloats the number of requests (quadratic amount of total token). I filter 95th percentile
-  max_rows: 1000000
-  interleave: true  # interleave conversations with Poisson arrivals for realistic cache miss patterns
-  train_frac: 0.5   # fraction of requests used for cache warmup (train); rest is test
-
 strategies:
-  - tag: "no_cache" # do not delete this strat - code asumes that it is used TODO: hardcode this
-    type: "no_cache"
-    label: "No caching"
-    color: "black"
-    marker: "o"
-
-  - tag: "kv_only"
-    type: "kv_only"
-    label: "KV cache only"
-    color: "tab:red"
-    marker: "s"
-
-  - tag: "block_768"
-    type: "balanced_fix_blocksize"
-    block_size: 768
-    label: "Block (B=768)"
-    color: "tab:blue"
-    marker: "^"
-    linewidth: 1.5
-
-  - tag: "balanced_1"
-    type: "balanced_fix_nblocks"
-    n_blocks: 1
-    label: "Balanced (1 block)"
-    color: "tab:cyan"
-    marker: "D"
-    linewidth: 1.5
-    skip: 768
-
-    # skipped: i cant afford such context lengths
-#   - tag: "sqrt"
-#     type: "sqrt"
-#     label: "Sqrt"
-#     color: "tab:green"
-#     marker: "p"
-#     skip: 768 * 768
-#
-  - tag: "log_768"
-    type: "diadic"
-    label: "Logarithmic (starting at 768)"
-    color: "tab:orange"
-    marker: "v"
-    start_at: 768
-
-  - tag: "hist_frozen"
-    type: "histogram_frozen"
-    n_blocks: 1
-    bin_size: 128
-    label: "DP-optimal (frozen)"
-    color: "tab:purple"
-    marker: "X"
-
-  - tag: "hist_periodic"
-    type: "histogram_periodic"
-    n_blocks: 1
-    bin_size: 128
-    label: "DP-optimal (periodic H=100)"
-    color: "tab:brown"
-    marker: "P"
-    linestyle: "--"
-
-  - tag: "hist_exp_decay"
-    type: "histogram_exp_decay"
-    n_blocks: 1
-    bin_size: 128
-    label: "DP-optimal (exp decay γ=0.99)"
-    color: "tab:olive"
-    marker: "*"
-    linestyle: "--"
-
+  - no_cache   # do not delete this strat - code assumes that it is used
+  - kv_only
+  - block_768
+  - balanced_1
+  - log_768
+  - hist_frozen
+  - hist_periodic
+  - hist_exp_decay
 
 # Qwen3.5-0.8B dimensions
 model:
