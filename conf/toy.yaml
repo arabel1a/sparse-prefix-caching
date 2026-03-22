@@ -4,7 +4,6 @@ defaults:
   - config
   - _self_
 
-output_dir: outputs/toy
 run_name: toy
 data:
   max_seq_len: 2048

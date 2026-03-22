@@ -135,15 +135,24 @@ def setup_output_dir(cfg, task: str):
 
     console_level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
 
+    # clear Hydra's default handlers so we control what goes to console
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(logging.DEBUG)  # let handlers decide what to keep
+
+    # file: capture everything (INFO+), including third-party loggers
     file_handler = logging.FileHandler(out_dir / "run.log")
-    file_handler.setLevel(logging.INFO)  # always capture INFO+ to file
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    root.addHandler(file_handler)
+
+    # console: only our loggers, at configured level
+    _OUR_PKGS = {"prepare_data", "benchmark_single", "benchmark_e2e",
+                 "plot_results", "spase_cache", "__main__", "root"}
     console_handler = logging.StreamHandler()
     console_handler.setLevel(console_level)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)  # root must be at least as permissive as file handler
-    root.addHandler(file_handler)
+    console_handler.addFilter(lambda r: r.name.split(".")[0] in _OUR_PKGS)
     root.addHandler(console_handler)
     return out_dir
 

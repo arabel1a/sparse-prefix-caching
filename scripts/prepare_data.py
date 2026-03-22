@@ -622,8 +622,8 @@ def prepare_all(out_dir, full_cfg, **_kw):
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    resolve_strategies(cfg)
     out_dir = setup_output_dir(cfg, "prepare_data")
+    resolve_strategies(cfg)
     fn = hydra.utils.get_method(cfg.prepare_data._target_)
     fn(out_dir=out_dir, full_cfg=cfg)
 

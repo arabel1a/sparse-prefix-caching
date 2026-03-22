@@ -1,15 +1,15 @@
+defaults:
+  - data: sharegpt
+  - _self_
+
 run_name: full
-output_dir: outputs/${run_name}
+output_dir: outputs/${data.name}/${run_name}
 overwrite: False
 log_level: WARNING   # DEBUG, INFO, WARNING, ERROR
 
 device: mps  # cpu, cuda, mps
 dtype: float16  # enable 2080's tensor cores
 seed: 42
-
-defaults:
-  - data: sharegpt
-  - _self_
 
 hydra:
   run:
@@ -19,13 +19,13 @@ hydra:
 strategies:
   - no_cache   # do not delete this strat - code assumes that it is used
   - kv_only
-  - block_768
+#  - block_768
   - balanced_1
-  - log_768
+#  - log_768
   - hist_frozen
-  - hist_periodic
-  - hist_exp_decay
-
+#   - hist_periodic
+#   - hist_exp_decay
+ 
 # Qwen3.5-0.8B dimensions
 model:
   name: "Qwen3.5-0.8B"
