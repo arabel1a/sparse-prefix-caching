@@ -158,10 +158,14 @@ class HistogramTracker:
 
     def get_positions(self, seq_len):
         """Get checkpoint positions for a request of given length."""
-        should_solve = False
         if self._positions is None:
-            should_solve = True
-        elif self.mode == 'frozen':
+            # No DP solution yet — use balanced fallback until first solve
+            # (first solve is triggered at end of warmup, like frozen)
+            block = max(1, seq_len // (self.budget + 1))
+            return list(range(block, seq_len + 1, block))[:self.budget]
+
+        should_solve = False
+        if self.mode == 'frozen':
             pass
         elif self.mode in ('periodic', 'exp_decay'):
             if self._dirty and self.n_obs % self.replan_interval == 0:

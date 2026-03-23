@@ -95,6 +95,10 @@ def warmup_cache(model, dataset, requests, vocab_size, strategy,
     if is_hist and histogram_tracker is not None:
         if strategy.type == 'histogram_frozen':
             histogram_tracker.freeze()
+        else:
+            # First DP solve on accumulated warmup data (like frozen),
+            # but keep the mode for online re-solving during simulate.
+            histogram_tracker.solve()
 
     return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
 
