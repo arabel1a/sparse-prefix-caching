@@ -4,9 +4,10 @@ defaults:
   - config
   - _self_
 
-run_name: toy
+output_dir: outputs/toy
+run_name: toytest
 data:
-  max_seq_len: 2048
+  max_seq_len: 16384
   max_rows: 100
 
 benchmark_baselines:
@@ -15,3 +16,7 @@ benchmark_baselines:
 benchmark_e2e:
   kv_budget_gb: 0.1
   gdn_budget_gb: 0.1
+
+strategies:
+  - no_cache
+  - hist_frozen

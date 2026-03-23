@@ -1,0 +1,7 @@
+tag: "block_768"
+type: "balanced_fix_blocksize"
+block_size: 768
+label: "Block (B=768)"
+color: "tab:blue"
+marker: "^"
+linewidth: 1.5

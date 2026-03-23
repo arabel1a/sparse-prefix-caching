@@ -1,5 +1,6 @@
 defaults:
   - config
+  - _self_
 
 # Theoretical analysis dimensions (for plot_flops_cache.py)
 model:
@@ -29,4 +30,3 @@ memory_analysis:
 plot_benchmark:
   seq_lens: [1023, 1024, 1536, 2047, 2048, 3072, 4095, 4096]
   output: assets/empirical_latency_and_cache_27b.png
-

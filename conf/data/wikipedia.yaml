@@ -1,0 +1,27 @@
+_target_: spase_cache.datasets.wikipedia.WikipediaDataset
+name: wikipedia
+format: revision
+raw_dir: data/wikipedia
+processed: data/wikipedia_${run_name}.parquet
+max_seq_len: 16384
+min_seq_len: 1
+max_revisions: 500    # max revisions per article
+max_rows: 1000000
+interleave: true
+train_frac: 0.5
+skip_fetch: True # false
+
+fetch:
+  max_revisions: 500
+  min_words: 6000
+  articles:
+    - "United States"
+    - "World War II"
+    - "Climate change"
+    - "Python (programming language)"
+    - "Russia"
+    - "History of China"
+    - "Evolution"
+    - "Solar System"
+    - "Roman Empire"
+    - "Machine learning"

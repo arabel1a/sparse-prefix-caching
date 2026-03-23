@@ -14,6 +14,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
+from omegaconf import DictConfig, OmegaConf
 from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5TextConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DynamicCache, Qwen3_5TextModel
 
@@ -23,6 +25,40 @@ from spase_cache.checkpoint_cache import (
 )
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Strategy resolution
+# ---------------------------------------------------------------------------
+_STRATEGY_DIR = Path(__file__).resolve().parent.parent / "conf" / "strategy"
+
+
+def resolve_strategies(cfg):
+    """Resolve strategy name list into full strategy configs.
+
+    Each entry in cfg.strategies is either a plain string (strategy name)
+    or a single-key dict {name: {overrides}}.  We load the corresponding
+    YAML from conf/strategy/<name>.yaml and merge overrides on top.
+    """
+    resolved = []
+    for entry in cfg.strategies:
+        if isinstance(entry, str):
+            name, overrides = entry, {}
+        else:
+            # single-key dict: {"hist_frozen": {"n_blocks": 2}}
+            name = list(entry.keys())[0]
+            overrides = dict(entry[name])
+
+        yaml_path = _STRATEGY_DIR / f"{name}.yaml"
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
+
+        with open(yaml_path) as f:
+            base = yaml.safe_load(f)
+        base.update(overrides)
+        resolved.append(base)
+
+    OmegaConf.update(cfg, "strategies", resolved)
+    log.info("resolved %d strategies: %s", len(resolved), [s["tag"] for s in resolved])
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +181,53 @@ def _get_attention_layers(config: Qwen3_5TextConfig) -> list[int]:
     return [i for i, lt in enumerate(config.layer_types) if lt == "full_attention"]
 
 
+def gdn_checkpoint_bytes(config: Qwen3_5TextConfig) -> int:
+    """Bytes for one GDN checkpoint (all linear-attention layers in one group).
+
+    Per layer: recurrent state n_v * d_h * d_h  +  conv state n_v * d_h * (K-1).
+    Summed over all linear-attention layers.
+    Formula from README: 3 * n_v * d_h^2 (dominant term, ignoring conv).
+    """
+    n_v = config.linear_num_value_heads
+    d_h = config.linear_value_head_dim
+    k = config.linear_conv_kernel_dim
+    n_linear = len(_get_linear_layers(config))
+    elem = 2 if str(config.torch_dtype) in ("float16", "torch.float16", "bfloat16", "torch.bfloat16") else 4
+    rec_elems = n_v * d_h * d_h
+    conv_elems = n_v * d_h * (k - 1)
+    return n_linear * (rec_elems + conv_elems) * elem
+
+
+def kv_per_token_bytes(config: Qwen3_5TextConfig) -> int:
+    """Bytes of attention KV cache per token (all attention layers in one group).
+
+    Per layer per token: 2 * n_kv * d_a (key + value).
+    """
+    n_kv = config.num_key_value_heads
+    d_a = config.head_dim
+    n_attn = len(_get_attention_layers(config))
+    elem = 2 if str(config.torch_dtype) in ("float16", "torch.float16", "bfloat16", "torch.bfloat16") else 4
+    return n_attn * 2 * n_kv * d_a * elem
+
+
+def compute_r(config: Qwen3_5TextConfig) -> float:
+    """Ratio of per-checkpoint GDN size to per-token KV size.
+
+    r = gdn_checkpoint_bytes / kv_per_token_bytes.
+    From README: r = 3 * n_v * d_h^2 / (2 * n_kv * d_a)  (element-count ratio,
+    same as byte ratio since both use the same dtype).
+    For 0.8B: r=768, for 27B: r=4608.
+    """
+    ckpt_b = gdn_checkpoint_bytes(config)
+    kv_b = kv_per_token_bytes(config)
+    return ckpt_b / kv_b
+
+
+def max_checkpoints_for_budget(config: Qwen3_5TextConfig, gdn_budget_bytes: int) -> int:
+    """Maximum number of GDN checkpoints that fit in a given byte budget."""
+    return gdn_budget_bytes // gdn_checkpoint_bytes(config)
+
+
 def make_model_config(cfg) -> Qwen3_5TextConfig:
     return Qwen3_5TextConfig(
         vocab_size=cfg.model.vocab_size,
@@ -247,7 +330,7 @@ def prefill_and_capture_at(model, input_ids, ckpt_positions):
     attn_layers = _get_attention_layers(config)
 
     ckpt_positions = sorted(set(p for p in ckpt_positions if 0 < p <= seq_len))
-    store = PrefixCheckpointStore(prefix_tokens=input_ids.clone().cpu())
+    store = PrefixCheckpointStore(prefix_tokens=input_ids[0].clone().cpu())
     boundaries = sorted(set([0] + ckpt_positions + [seq_len]))
 
     log.info("capture %d ckpts for seq_len=%d, boundaries=%d segments, gpu=%.0fMB",
@@ -328,51 +411,91 @@ def _truncate_gdn(store, gdn_budget):
     return store  # all checkpoints removed
 
 
+def _prefix_match_len(stored_tokens, input_ids):
+    """Length of common prefix between stored token tensor and input_ids tensor.
+
+    Both are 1-D int tensors. Comparison is vectorized.
+    """
+    n = min(len(stored_tokens), len(input_ids))
+    if n == 0:
+        return 0
+    match = stored_tokens[:n] == input_ids[:n]
+    # first mismatch position (or n if all match)
+    mismatches = torch.where(~match)[0]
+    return n if len(mismatches) == 0 else mismatches[0].item()
+
+
 class PrefixCache:
-    """FIFO prefix cache with separate KV and GDN budgets."""
+    """FIFO prefix cache with separate KV and GDN budgets.
+
+    Entries are keyed by (conv_id, seq_id) internally. Lookup finds the
+    entry for a given conv_id whose prefix_tokens best matches the query.
+    """
 
     def __init__(self, kv_budget_bytes, gdn_budget_bytes):
         self.kv_budget = kv_budget_bytes
         self.gdn_budget = gdn_budget_bytes
         self.kv_used = 0
         self.gdn_used = 0
-        self.entries = OrderedDict()  # key -> (store, kv_bytes, gdn_bytes)
+        self.entries = OrderedDict()  # (conv_id, seq_id) -> (store, kv_bytes, gdn_bytes)
+        self._conv_entries = defaultdict(list)  # conv_id -> list of (conv_id, seq_id) keys
+        self._next_id = 0
 
-    def get(self, key):
-        if key in self.entries:
-            return self.entries[key][0]
-        return None
+    def find_best_prefix(self, conv_id, input_ids):
+        """Find cached entry for conv_id with longest token prefix match.
 
-    def find_best_prefix(self, conv_id, turn):
-        """Find the longest cached prefix for this conversation with turn index < turn."""
-        for t in range(turn - 1, -1, -1):
-            k = (conv_id, t)
-            if k in self.entries:
-                return self.entries[k][0], t
-        return None, -1
+        Args:
+            conv_id: conversation / document id.
+            input_ids: 1-D token tensor for the current request.
 
-    def put(self, key, store, _size_bytes=None):
-        # Truncate GDN checkpoints if they exceed per-entry GDN budget
+        Returns (store, match_len) or (None, 0).
+        """
+        best_store = None
+        best_len = 0
+        for key in self._conv_entries.get(conv_id, []):
+            if key not in self.entries:
+                continue
+            store = self.entries[key][0]
+            if store.prefix_tokens is None:
+                continue
+            ml = _prefix_match_len(store.prefix_tokens, input_ids)
+            if ml > best_len:
+                best_len = ml
+                best_store = store
+        return best_store, best_len
+
+    def put(self, conv_id, store, _size_bytes=None):
         _truncate_gdn(store, self.gdn_budget)
 
         kv_b = store.kv_bytes()
         gdn_b = store.gdn_bytes()
 
         if kv_b > self.kv_budget:
-            return  # single entry's KV exceeds budget, skip
+            return
 
-        # Evict oldest entries until both budgets have room
         while self.entries and (
             self.kv_used + kv_b > self.kv_budget or
             self.gdn_used + gdn_b > self.gdn_budget
         ):
-            _, (_, evicted_kv, evicted_gdn) = self.entries.popitem(last=False)
+            evicted_key, (_, evicted_kv, evicted_gdn) = self.entries.popitem(last=False)
             self.kv_used -= evicted_kv
             self.gdn_used -= evicted_gdn
+            # clean up conv index
+            ecid = evicted_key[0]
+            if ecid in self._conv_entries:
+                try:
+                    self._conv_entries[ecid].remove(evicted_key)
+                except ValueError:
+                    pass
+                if not self._conv_entries[ecid]:
+                    del self._conv_entries[ecid]
 
+        key = (conv_id, self._next_id)
+        self._next_id += 1
         self.entries[key] = (store, kv_b, gdn_b)
         self.kv_used += kv_b
         self.gdn_used += gdn_b
+        self._conv_entries[conv_id].append(key)
 
     @property
     def n_entries(self):

@@ -1,0 +1,7 @@
+tag: "hist_frozen"
+type: "histogram_frozen"
+n_blocks: 1
+bin_size: 128
+label: "DP-optimal (frozen)"
+color: "tab:purple"
+marker: "X"

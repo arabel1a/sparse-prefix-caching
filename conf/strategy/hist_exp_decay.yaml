@@ -1,0 +1,8 @@
+tag: "hist_exp_decay"
+type: "histogram_exp_decay"
+n_blocks: 1
+bin_size: 128
+label: "DP-optimal (exp decay γ=0.99)"
+color: "tab:olive"
+marker: "*"
+linestyle: "--"

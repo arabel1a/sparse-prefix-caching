@@ -1,0 +1,11 @@
+_target_: spase_cache.datasets.nemotron_swe.NemotronSweDataset
+name: nemotron_swe
+format: revision
+processed: data/nemotron_swe_${run_name}.parquet
+max_seq_len: 16384
+min_seq_len: 1
+max_sessions: 5000
+max_rows: 1000000
+interleave: true
+train_frac: 0.5
+split: r2e_gym

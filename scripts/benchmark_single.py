@@ -17,6 +17,7 @@ from spase_cache.checkpoint_cache import (
 )
 from spase_cache.utils import (
     setup_output_dir,
+    resolve_strategies,
     make_model,
     prefill_baseline,
     _model_device,
@@ -38,6 +39,7 @@ def _save_results(path, data):
 @hydra.main(config_path=r'../conf', config_name='config', version_base="1.3")
 def main(cfg: DictConfig):
     out_dir = setup_output_dir(cfg, "benchmark_single")
+    resolve_strategies(cfg)
     model = make_model(cfg)
     dev = _model_device(model)
     config = model.config
@@ -85,8 +87,10 @@ def main(cfg: DictConfig):
 
         # Checkpoint strategies: always include KV cache
         for strat in strategies:
-            if strat.tag == "no_cache":
+            if strat.type == "no_cache":
                 continue
+            if strat.type.startswith("histogram_"):
+                continue  # histogram strategies need trace data, skip in single-seq benchmark
 
             positions = checkpoint_positions(N, **strat)
             _sync_device(dev)
