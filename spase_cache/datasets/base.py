@@ -26,6 +26,7 @@ class Dataset(ABC):
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self._requests = None
+        self.max_requests = cfg.max_requests
 
     # -- abstract interface --------------------------------------------------
 
@@ -56,10 +57,10 @@ class Dataset(ABC):
 
     @property
     def requests(self) -> list:
-        return self._requests
+        return self._requests[:self.max_requests]
 
     def train_test_split(self, train_frac=None):
         if train_frac is None:
             train_frac = self.cfg.get("train_frac", 0.5)
-        n_train = int(len(self._requests) * train_frac)
-        return self._requests[:n_train], self._requests[n_train:]
+        n_train = int(len(self.requests) * train_frac)
+        return self.requests[:n_train], self.requests[n_train:]

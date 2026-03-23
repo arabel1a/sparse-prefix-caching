@@ -1,14 +1,13 @@
+defaults:
+  - _self_
+  - base
+
 _target_: spase_cache.datasets.wikipedia.WikipediaDataset
 name: wikipedia
 format: revision
 raw_dir: data/wikipedia
 processed: data/wikipedia_${run_name}.parquet
-max_seq_len: 16384
-min_seq_len: 1
 max_revisions: 500    # max revisions per article
-max_rows: 1000000
-interleave: true
-train_frac: 0.5
 skip_fetch: True # false
 
 fetch:

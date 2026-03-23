@@ -78,6 +78,11 @@ class NemotronSweDataset(Dataset):
                  len(set(r["session_idx"] for r in rows)), len(rows),
                  len(set(r["repo"] for r in rows)))
 
+        max_rows = cfg.get("max_rows", len(rows))
+        if len(rows) > max_rows:
+            rows = rows[:max_rows]
+            log.info("Capped to %d rows (max_rows)", max_rows)
+
         # Tokenize
         chunk_size = cfg.get("tokenizer_chunk_size", 16)
         texts = [r["text"] for r in rows]
@@ -101,8 +106,6 @@ class NemotronSweDataset(Dataset):
             n_before = len(df)
             df = df.filter(pl.col("n_tokens") >= min_seq_len)
             log.info("Dropped %d calls shorter than %d tokens", n_before - len(df), min_seq_len)
-
-        df = df.head(cfg.get("max_rows", len(df)))
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

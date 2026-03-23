@@ -7,6 +7,11 @@ output_dir: outputs/medium
 run_name: medium
 data:
   max_rows: 10000
+  max_requests: 1000
 
 benchmark_baselines:
   seq_lens: [1024, 4096, 16384]
+
+benchmark_e2e:
+  kv_budget_gb: 2
+  gdn_budget_gb: 2

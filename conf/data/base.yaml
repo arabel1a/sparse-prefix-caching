@@ -1,0 +1,5 @@
+max_seq_len: 16384
+min_seq_len: 1
+interleave: true
+train_frac: 0.8
+max_rows: 100000

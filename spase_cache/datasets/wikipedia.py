@@ -146,6 +146,11 @@ class WikipediaDataset(Dataset):
         for slug in sorted(by_article):
             limited_rows.extend(by_article[slug][:max_revisions])
 
+        max_rows = cfg.get("max_rows", len(limited_rows))
+        if len(limited_rows) > max_rows:
+            limited_rows = limited_rows[:max_rows]
+            log.info("Capped to %d rows (max_rows)", max_rows)
+
         log.info("Tokenizing %d revisions...", len(limited_rows))
         chunk_size = cfg.get("tokenizer_chunk_size", 16)
         texts = [r["text"] for r in limited_rows]
@@ -169,8 +174,6 @@ class WikipediaDataset(Dataset):
             n_before = len(df)
             df = df.filter(pl.col("n_tokens") >= min_seq_len)
             log.info("Dropped %d revisions shorter than %d tokens", n_before - len(df), min_seq_len)
-
-        df = df.head(cfg.get("max_rows", len(df)))
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -86,6 +86,11 @@ class Osst1Dataset(Dataset):
         log.info("OASST1: %d trees, %d paths (min_paths=%d)",
                  len(set(r["tree_id"] for r in rows)), len(rows), min_paths)
 
+        max_rows = cfg.get("max_rows", len(rows))
+        if len(rows) > max_rows:
+            rows = rows[:max_rows]
+            log.info("Capped to %d rows (max_rows)", max_rows)
+
         # Tokenize
         chunk_size = cfg.get("tokenizer_chunk_size", 64)
         texts = [r["text"] for r in rows]
@@ -108,8 +113,6 @@ class Osst1Dataset(Dataset):
             n_before = len(df)
             df = df.filter(pl.col("n_tokens") >= min_seq_len)
             log.info("Dropped %d paths shorter than %d tokens", n_before - len(df), min_seq_len)
-
-        df = df.head(cfg.get("max_rows", len(df)))
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

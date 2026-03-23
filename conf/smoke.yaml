@@ -6,7 +6,8 @@ defaults:
 
 run_name: smoke
 data:
-  max_rows: 20
+  max_rows: 4
+  max_requests: 8
   max_seq_len: 1000
 
 strategies:
