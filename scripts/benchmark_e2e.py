@@ -82,7 +82,7 @@ def warmup_cache(model, dataset, requests, vocab_size, strategy,
             histogram_tracker.observe(match_len)
 
         if cached_store is not None:
-            prefill_from_checkpoint(model, input_ids, cached_store)
+            prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
         else:
             prefill_baseline(model, input_ids)
         _sync_device(dev)
@@ -136,12 +136,12 @@ def simulate(model, dataset, requests, vocab_size, strategy,
             hit = True
             _sync_device(dev)
             t0 = time.perf_counter()
-            prefill_from_checkpoint(model, input_ids, cached_store)
+            prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
             _sync_device(dev)
             dt = time.perf_counter() - t0
-            kv_len = min(cached_store.kv_len, seq_len)
+            kv_len = min(cached_store.kv_len, seq_len, match_len)
             reusable_kv = kv_len
-            ckpt = cached_store.best_checkpoint(min(kv_len, seq_len))
+            ckpt = cached_store.best_checkpoint(kv_len)
             if ckpt:
                 tokens_saved = ckpt.position
                 reusable_gdn = ckpt.position

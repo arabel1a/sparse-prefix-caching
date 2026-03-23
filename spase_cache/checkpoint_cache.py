@@ -93,16 +93,21 @@ def prefill_from_checkpoint(
     input_ids: torch.Tensor,
     store: PrefixCheckpointStore,
     max_chunk: int = 4096,
+    match_len: int | None = None,
 ) -> tuple[torch.Tensor, Qwen3_5DynamicCache]:
     """Resume prefill from best GDN checkpoint, recomputing full model for tail.
 
     To produce GDN input at layer i, we need attention output at layer i-1.
     Attention output requires Q (from current hidden states), not just cached
     K,V.  So all FFNs and attention must recompute from the checkpoint/last kv
-    onward. 
-   
+    onward.
+
     Therefore: full model runs from checkpoint position m to seq_len.
     If no GDN checkpoint exists, this is equivalent to no_cache.
+
+    match_len: number of leading tokens that actually match the stored prefix.
+        KV cache and GDN checkpoints beyond this point are stale (computed for
+        different tokens) and must not be used.
     """
     from spase_cache.utils import _model_device, _get_linear_layers, _get_attention_layers, prefill_baseline, chunked_prefill
 
@@ -113,8 +118,10 @@ def prefill_from_checkpoint(
     linear_layers = _get_linear_layers(config)
     attn_layers = _get_attention_layers(config)
 
-    # Determine available KV cache length
+    # Determine available KV cache length, clipped to actual prefix match
     kv_len = min(store.kv_len, seq_len)
+    if match_len is not None:
+        kv_len = min(kv_len, match_len)
 
     # Best GDN checkpoint that doesn't exceed KV coverage.
     # If GDN checkpoint is ahead of KV, attention would miss positions
