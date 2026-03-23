@@ -4,10 +4,19 @@ defaults:
   - config
   - _self_
 
-run_name: toy
+run_name: smoke
 data:
-  max_rows: 100
-  max_seq_len: 100
+  max_rows: 20
+  max_seq_len: 1000
+
+strategies:
+  - no_cache   # do not delete this strat - code assumes that it is used
+  - kv_only
+  - balanced
+  - block
+  - log
+  - hist_frozen
+  - hist_exp_decay
 
 benchmark_baselines:
   seq_lens: [128, 256, 512, 1024]

@@ -153,6 +153,7 @@ def simulate(model, dataset, requests, vocab_size, strategy,
             dt = time.perf_counter() - t0
 
         capture_s = 0.0
+        positions=[]
         if uses_cache:
             positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
             _sync_device(dev)
@@ -166,6 +167,8 @@ def simulate(model, dataset, requests, vocab_size, strategy,
 
         per_request.append({
             "conv_id": str(conv_id), "seq_len": seq_len,
+            "added_positions": positions,
+            "seq_len": seq_len,
             "time_s": dt, "capture_s": capture_s, "hit": hit,
             "tokens_saved": tokens_saved,
             "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
