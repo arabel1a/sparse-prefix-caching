@@ -1,8 +1,0 @@
-tag: "balanced_1"
-type: "balanced_fix_nblocks"
-n_blocks: 1
-label: "Balanced (1 block)"
-color: "tab:cyan"
-marker: "D"
-linewidth: 1.5
-skip: 768

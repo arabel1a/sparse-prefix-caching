@@ -1,8 +1,8 @@
-tag: "hist_exp_decay"
-type: "histogram_exp_decay"
 n_blocks: 1
+tag: "hist_exp_decay_${n_blocks}"
+type: "histogram_exp_decay"
 bin_size: 128
-label: "DP-optimal (exp decay γ=0.99)"
+label: "DP-optimal (${n_blocks} blocks, exp decay γ=0.99)"
 color: "tab:olive"
 marker: "*"
 linestyle: "--"

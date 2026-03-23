@@ -7,10 +7,11 @@ defaults:
 run_name: toy
 data:
   max_rows: 100
+  max_seq_len: 100
 
 benchmark_baselines:
   seq_lens: [128, 256, 512, 1024]
 
 benchmark_e2e:
-  kv_budget_gb: 0.5
-  gdn_budget_gb: 0.5
+  kv_budget_gb: 0.2
+  gdn_budget_gb: 0.2

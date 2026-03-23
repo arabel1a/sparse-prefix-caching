@@ -19,12 +19,27 @@ hydra:
 strategies:
   - no_cache   # do not delete this strat - code assumes that it is used
   - kv_only
-#  - block_768
-  - balanced_1
-#  - log_768
+  - balanced
+  - balanced: {n_blocks: 2}
+  - balanced: {n_blocks: 4}
+  - balanced: {n_blocks: 8}
+  - balanced: {n_blocks: 16}
+  - block
+  - block: {block_size: 1024}
+  - block: {block_size: 2048}
+  - block: {block_size: 4096}
+  - log
+  - log: {start_at: 0}
   - hist_frozen
-#   - hist_periodic
-#   - hist_exp_decay
+  - hist_frozen: {n_blocks: 2}
+  - hist_frozen: {n_blocks: 4}
+  - hist_frozen: {n_blocks: 8}
+  - hist_frozen: {n_blocks: 16}
+  - hist_exp_decay
+  - hist_exp_decay: {n_blocks: 2}
+  - hist_exp_decay: {n_blocks: 4}
+  - hist_exp_decay: {n_blocks: 8}
+  - hist_exp_decay: {n_blocks: 16}
  
 # Qwen3.5-0.8B dimensions
 model:

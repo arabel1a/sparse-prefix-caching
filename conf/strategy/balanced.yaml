@@ -1,0 +1,8 @@
+skip: 0 
+n_blocks: 1
+tag: "balanced_${n_blocks}_${skip}"
+type: "balanced_fix_nblocks"
+label: "Balanced(${n_blocks} blocks | skip ${skip})"
+color: "tab:cyan"
+marker: "D"
+linewidth: 1.5
