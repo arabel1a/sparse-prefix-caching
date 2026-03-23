@@ -55,6 +55,10 @@ def resolve_strategies(cfg):
         with open(yaml_path) as f:
             base = yaml.safe_load(f)
         base.update(overrides)
+        # Resolve ${key} interpolations within each strategy dict
+        for k, v in base.items():
+            if isinstance(v, str) and "${" in v:
+                base[k] = v.replace("${", "{").format_map(base)
         resolved.append(base)
 
     OmegaConf.update(cfg, "strategies", resolved)
