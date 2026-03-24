@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from transformers.models.qwen3_5.modeling_qwen3_5 import (
     Qwen3_5DynamicCache,
     Qwen3_5GatedDeltaNet,
@@ -53,6 +54,39 @@ def apply_sdpa_patch():
 
 
 # ---------------------------------------------------------------------------
+# GDN chunk-state capture mechanism.
+#
+# When enabled, the patched GDN forward uses chunk_gated_delta_rule_with_states
+# and extracts recurrent states at requested 64-token chunk boundaries.
+# States are moved to CPU immediately to avoid GPU memory buildup.
+# ---------------------------------------------------------------------------
+GDN_CHUNK_SIZE = 64
+
+_capture_enabled = False
+_capture_positions = set()   # absolute positions (multiples of 64) to capture
+_captured_states = {}        # layer_idx -> {position: (recurrent_state, conv_state) on CPU}
+
+
+@contextmanager
+def capture_gdn_states(positions):
+    """Enable GDN chunk-state capture at given positions during forward pass.
+
+    Positions are rounded down to GDN_CHUNK_SIZE boundaries.
+    Yields a dict: {layer_idx: {position: state_tensor}}.
+    """
+    global _capture_enabled, _capture_positions, _captured_states
+    _capture_enabled = True
+    _capture_positions = set(
+        (p // GDN_CHUNK_SIZE) * GDN_CHUNK_SIZE for p in positions if p > 0
+    )
+    _captured_states = {}
+    try:
+        yield _captured_states
+    finally:
+        _capture_enabled = False
+
+
+# ---------------------------------------------------------------------------
 # Monkey-patch: pass initial_state during chunked prefill when cache exists
 # ---------------------------------------------------------------------------
 def _patched_gdn_forward(
@@ -79,6 +113,8 @@ def _patched_gdn_forward(
         recurrent_state = cache_params.recurrent_states[self.layer_idx]
 
     mixed_qkv = self.in_proj_qkv(hidden_states).transpose(1, 2)
+    # Keep raw pre-activation QKV for conv_state capture (before conv overwrites it)
+    raw_qkv = mixed_qkv if _capture_enabled else None
     z = self.in_proj_z(hidden_states).reshape(batch_size, seq_len, -1, self.head_v_dim)
     b = self.in_proj_b(hidden_states)
     a = self.in_proj_a(hidden_states)
@@ -132,12 +168,50 @@ def _patched_gdn_forward(
     if not use_precomputed_states:
         # PATCH: pass recurrent_state as initial_state when continuing from checkpoint
         initial = recurrent_state if (cache_params is not None and recurrent_state is not None) else None
-        core_attn_out, last_recurrent_state = self.chunk_gated_delta_rule(
-            query, key, value, g=g, beta=beta,
-            initial_state=initial,
-            output_final_state=cache_params is not None,
-            use_qk_l2norm_in_kernel=True,
-        )
+
+        if _capture_enabled:
+            core_attn_out, last_recurrent_state, h = chunk_gated_delta_rule_with_states(
+                query, key, value, g=g, beta=beta,
+                initial_state=initial,
+                output_final_state=cache_params is not None,
+                use_qk_l2norm_in_kernel=True,
+            )
+            # Extract recurrent + conv states at requested chunk boundaries.
+            # raw_qkv is the pre-activation QKV tensor (B, C, seq_len) captured
+            # before the conv overwrites mixed_qkv. For continuation chunks,
+            # prepend the previous conv_state to get a complete raw stream.
+            offset = cache_position[0].item() if cache_position is not None else 0
+            if _capture_positions:
+                if self.layer_idx not in _captured_states:
+                    _captured_states[self.layer_idx] = {}
+
+                # Build full raw QKV stream for conv_state extraction
+                if is_continuation and conv_state is not None:
+                    full_raw = torch.cat([conv_state, raw_qkv], dim=-1)
+                    raw_offset = offset - K  # conv_state covers [offset-K, offset)
+                else:
+                    full_raw = raw_qkv
+                    raw_offset = offset
+
+                for i in range(h.shape[1]):
+                    abs_pos = offset + i * GDN_CHUNK_SIZE
+                    if abs_pos in _capture_positions:
+                        rec = h[:, i].cpu()
+                        # conv_state at abs_pos = last K raw values ending at abs_pos
+                        local_end = abs_pos - raw_offset
+                        local_start = max(local_end - K, 0)
+                        cs = full_raw[:, :, local_start:local_end].cpu()
+                        if cs.shape[-1] < K:
+                            cs = F.pad(cs, (K - cs.shape[-1], 0))
+                        _captured_states[self.layer_idx][abs_pos] = (rec, cs)
+            del h
+        else:
+            core_attn_out, last_recurrent_state = self.chunk_gated_delta_rule(
+                query, key, value, g=g, beta=beta,
+                initial_state=initial,
+                output_final_state=cache_params is not None,
+                use_qk_l2norm_in_kernel=True,
+            )
     else:
         core_attn_out, last_recurrent_state = self.recurrent_gated_delta_rule(
             query, key, value, g=g, beta=beta,
@@ -160,3 +234,76 @@ def apply_patched_gdn_forward():
     """Replace GatedDeltaNet.forward with our patched version."""
     logging.warning("Monkey-patching Qwen3.5 GDN forward")
     Qwen3_5GatedDeltaNet.forward = _patched_gdn_forward
+
+
+# ---------------------------------------------------------------------------
+# Inference-only GDN forward that returns intermediate chunk states.
+#
+# The standard chunk_gated_delta_rule computes h[B, NT, H, K, V] internally
+# (one state per 64-token chunk boundary) but discards it. This function
+# calls the same Triton kernels directly, skipping the autograd wrapper,
+# and returns h alongside the normal outputs.
+#
+# h[:, i, ...] is the recurrent state *before* processing chunk i, i.e.
+# the state after tokens [0 .. i*64). So h[:, 0, ...] is the initial state
+# and the final state equals h after the last chunk.
+# ---------------------------------------------------------------------------
+
+def chunk_gated_delta_rule_with_states(
+    q, k, v, g, beta,
+    scale=None,
+    initial_state=None,
+    output_final_state=False,
+    use_qk_l2norm_in_kernel=False,
+    cu_seqlens=None,
+    cu_seqlens_cpu=None,
+):
+    """Inference-only chunk_gated_delta_rule that also returns chunk-boundary states.
+
+    Returns:
+        o:           [B, T, H, V]  — same as chunk_gated_delta_rule
+        final_state: [N, H, K, V]  — same as chunk_gated_delta_rule
+        h:           [B, NT, H, K, V] — recurrent state at each chunk boundary (every 64 tokens)
+    """
+    from fla.modules.l2norm import l2norm_fwd
+    from fla.ops.gated_delta_rule.chunk_fwd import chunk_gated_delta_rule_fwd_intra
+    from fla.ops.common.chunk_delta_h import chunk_gated_delta_rule_fwd_h
+    from fla.ops.common.chunk_o import chunk_fwd_o
+    from fla.ops.utils import chunk_local_cumsum
+    from fla.ops.utils.index import prepare_chunk_indices
+
+    if scale is None:
+        scale = k.shape[-1] ** -0.5
+
+    if use_qk_l2norm_in_kernel:
+        q, _ = l2norm_fwd(q)
+        k, _ = l2norm_fwd(k)
+
+    chunk_indices = (
+        prepare_chunk_indices(cu_seqlens, 64, cu_seqlens_cpu=cu_seqlens_cpu)
+        if cu_seqlens is not None else None
+    )
+
+    g = chunk_local_cumsum(g, chunk_size=64, cu_seqlens=cu_seqlens, chunk_indices=chunk_indices)
+
+    w, u, A = chunk_gated_delta_rule_fwd_intra(
+        k=k, v=v, g=g, beta=beta,
+        cu_seqlens=cu_seqlens, chunk_indices=chunk_indices,
+    )
+
+    h, v_new, final_state = chunk_gated_delta_rule_fwd_h(
+        k=k, w=w, u=u, g=g,
+        initial_state=initial_state,
+        output_final_state=output_final_state,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
+    )
+
+    o = chunk_fwd_o(
+        q=q, k=k, v=v_new, h=h, g=g,
+        scale=scale,
+        cu_seqlens=cu_seqlens,
+        chunk_indices=chunk_indices,
+    )
+
+    return o.to(q.dtype), final_state, h

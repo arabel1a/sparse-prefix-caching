@@ -26,6 +26,7 @@ from spase_cache.checkpoint_cache import (
     PrefixCheckpointStore,
     RecurrentCheckpoint,
 )
+from spase_cache.patches import GDN_CHUNK_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -373,6 +374,65 @@ def prefill_and_capture_at(model, input_ids, ckpt_positions):
         if cache.key_cache[li] is not None:
             store.kv_cache_keys[li] = cache.key_cache[li].clone().cpu()
             store.kv_cache_values[li] = cache.value_cache[li].clone().cpu()
+    return store
+
+
+# ---------------------------------------------------------------------------
+# Build PrefixCheckpointStore from captured GDN chunk-boundary states.
+#
+# Used after a forward pass with capture_gdn_states() enabled.
+# States come from the FLA chunk kernel's h tensor — zero extra compute.
+# Positions are rounded to GDN_CHUNK_SIZE boundaries.
+# ---------------------------------------------------------------------------
+def build_store_from_captures(captured_states, input_ids, ckpt_positions,
+                              cache, config, existing_store=None):
+    """Build PrefixCheckpointStore from captured GDN chunk-boundary states.
+
+    Args:
+        captured_states: dict from capture_gdn_states context manager
+            {layer_idx: {position: (recurrent_state, conv_state) on CPU}}
+        input_ids: [1, seq_len] token tensor
+        ckpt_positions: list of requested checkpoint positions
+        cache: Qwen3_5DynamicCache from the forward pass
+        config: model config
+        existing_store: optional store to merge prefix checkpoints from
+    """
+    linear_layers = _get_linear_layers(config)
+    attn_layers = _get_attention_layers(config)
+    seq_len = input_ids.shape[1]
+
+    aligned = sorted(set(
+        (p // GDN_CHUNK_SIZE) * GDN_CHUNK_SIZE
+        for p in ckpt_positions if 0 < p <= seq_len
+    ))
+
+    store = PrefixCheckpointStore(prefix_tokens=input_ids[0].clone().cpu())
+
+    for pos in aligned:
+        rec = {}
+        conv = {}
+        for li in linear_layers:
+            if li in captured_states and pos in captured_states[li]:
+                rec[li], conv[li] = captured_states[li][pos]
+        if rec:
+            store.checkpoints[pos] = RecurrentCheckpoint(
+                position=pos,
+                recurrent_states=rec,
+                conv_states=conv,
+            )
+
+    # Carry over prefix checkpoints from existing store (cache-hit case)
+    if existing_store is not None:
+        for pos, ckpt in existing_store.checkpoints.items():
+            if pos not in store.checkpoints:
+                store.checkpoints[pos] = ckpt
+
+    # KV cache from final cache state
+    for li in attn_layers:
+        if cache.key_cache[li] is not None:
+            store.kv_cache_keys[li] = cache.key_cache[li].clone().cpu()
+            store.kv_cache_values[li] = cache.value_cache[li].clone().cpu()
+
     return store
 
 

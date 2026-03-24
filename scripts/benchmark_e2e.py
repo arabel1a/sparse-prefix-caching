@@ -19,6 +19,7 @@ from spase_cache.checkpoint_cache import (
     prefill_from_checkpoint,
 )
 from spase_cache.datasets.base import Dataset
+from spase_cache.patches import capture_gdn_states
 from spase_cache.utils import (
     setup_output_dir,
     resolve_strategies,
@@ -26,7 +27,7 @@ from spase_cache.utils import (
     prefill_baseline,
     _model_device,
     _sync_device,
-    prefill_and_capture_at,
+    build_store_from_captures,
     PrefixCache,
     _save_jsonl,
 )
@@ -81,23 +82,27 @@ def warmup_cache(model, dataset, requests, vocab_size, strategy,
         if is_hist and histogram_tracker is not None:
             histogram_tracker.observe(match_len)
 
-        if cached_store is not None:
-            prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
-        else:
-            prefill_baseline(model, input_ids)
+        positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy) if uses_cache else []
+
+        with capture_gdn_states(positions) as captured:
+            if cached_store is not None:
+                _, model_cache = prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
+            else:
+                _, model_cache = prefill_baseline(model, input_ids)
         _sync_device(dev)
-        positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
-        store = prefill_and_capture_at(model, input_ids, positions)
-        _sync_device(dev)
-        store.to("cpu")
-        cache.put(conv_id, store)
+
+        if uses_cache:
+            store = build_store_from_captures(
+                captured, input_ids, positions, model_cache, model.config,
+                existing_store=cached_store,
+            )
+            store.to("cpu")
+            cache.put(conv_id, store)
 
     if is_hist and histogram_tracker is not None:
         if strategy.type == 'histogram_frozen':
             histogram_tracker.freeze()
         else:
-            # First DP solve on accumulated warmup data (like frozen),
-            # but keep the mode for online re-solving during simulate.
             histogram_tracker.solve()
 
     return cache if uses_cache else PrefixCache(kv_budget, gdn_budget)
@@ -106,7 +111,12 @@ def warmup_cache(model, dataset, requests, vocab_size, strategy,
 def simulate(model, dataset, requests, vocab_size, strategy,
              kv_budget, gdn_budget, cache=None, progress=False,
              histogram_tracker=None):
-    """Run all requests through the model with given caching strategy."""
+    """Run all requests through the model with given caching strategy.
+
+    Single-pass: prefill and checkpoint capture happen in the same forward
+    pass.  The FLA chunk kernel already computes inter-chunk states h; we
+    just keep the ones at requested positions instead of discarding them.
+    """
     dev = _model_device(model)
     uses_cache = strategy.type != "no_cache"
     is_hist = _is_histogram_strategy(strategy.type)
@@ -136,35 +146,35 @@ def simulate(model, dataset, requests, vocab_size, strategy,
         if online_hist and histogram_tracker is not None:
             histogram_tracker.observe(match_len)
 
-        if cached_store is not None:
-            hit = True
-            _sync_device(dev)
-            t0 = time.perf_counter()
-            prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
-            _sync_device(dev)
-            dt = time.perf_counter() - t0
-            kv_len = min(cached_store.kv_len, seq_len, match_len)
-            reusable_kv = kv_len
-            ckpt = cached_store.best_checkpoint(kv_len)
-            if ckpt:
-                tokens_saved = ckpt.position
-                reusable_gdn = ckpt.position
-        else:
-            _sync_device(dev)
-            t0 = time.perf_counter()
-            prefill_baseline(model, input_ids)
-            _sync_device(dev)
-            dt = time.perf_counter() - t0
+        positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy) if uses_cache else []
 
+        # --- single timed pass: prefill + capture ---
+        _sync_device(dev)
+        t0 = time.perf_counter()
+
+        with capture_gdn_states(positions) as captured:
+            if cached_store is not None:
+                hit = True
+                _, model_cache = prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
+                kv_len = min(cached_store.kv_len, seq_len, match_len)
+                reusable_kv = kv_len
+                ckpt = cached_store.best_checkpoint(kv_len)
+                if ckpt:
+                    tokens_saved = ckpt.position
+                    reusable_gdn = ckpt.position
+            else:
+                _, model_cache = prefill_baseline(model, input_ids)
+
+        _sync_device(dev)
+        dt = time.perf_counter() - t0
+
+        # Build store from captured states (CPU-only, near-zero time)
         capture_s = 0.0
-        positions=[]
         if uses_cache:
-            positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
-            _sync_device(dev)
-            cap_t0 = time.perf_counter()
-            store = prefill_and_capture_at(model, input_ids, positions)
-            _sync_device(dev)
-            capture_s = time.perf_counter() - cap_t0
+            store = build_store_from_captures(
+                captured, input_ids, positions, model_cache, model.config,
+                existing_store=cached_store,
+            )
             store.to("cpu")
             cache.put(conv_id, store)
         _sync_device(dev)
