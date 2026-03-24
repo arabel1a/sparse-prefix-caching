@@ -13,6 +13,8 @@ import tempfile
 from collections import defaultdict
 from pathlib import Path
 
+import yaml
+
 import numpy as np
 import polars as pl
 from omegaconf import DictConfig
@@ -32,7 +34,7 @@ def _run(cmd: str, cwd: str = None, timeout: int = 300) -> str:
     return r.stdout.strip()
 
 
-def _fetch_file_history(repo: str, filepath: str, clone_dir: str, max_commits: int = 1000) -> list[dict]:
+def _fetch_file_history(repo: str, filepath: str, clone_dir: str, max_commits: int = 1000, timeout=120) -> list[dict]:
     """Clone repo (blobless) and extract all versions of a file, oldest-first."""
     repo_url = f"https://github.com/{repo}.git"
     repo_dir = Path(clone_dir) / repo.replace("/", "_")
@@ -41,7 +43,7 @@ def _fetch_file_history(repo: str, filepath: str, clone_dir: str, max_commits: i
         log.info("  Cloning %s (filter=blob:none)...", repo)
         subprocess.run(
             f"git clone --filter=blob:none --no-checkout {repo_url} {repo_dir}",
-            shell=True, check=True, capture_output=True, timeout=120,
+            shell=True, check=True, capture_output=True, timeout=timeout,
         )
 
     log_output = _run(
@@ -67,7 +69,7 @@ def _fetch_file_history(repo: str, filepath: str, clone_dir: str, max_commits: i
         if len(parts) != 3:
             continue
         commit, timestamp, message = parts
-        content = _run(f'git show {commit}:"{filepath}"', cwd=str(repo_dir), timeout=30)
+        content = _run(f'git show {commit}:"{filepath}"', cwd=str(repo_dir), timeout=timeout)
         if not content:
             continue
         results.append({
@@ -96,10 +98,17 @@ class GitHubDataset(Dataset):
 
         # Fetch if needed
         if not cfg.get("skip_fetch", True):
-            targets = list(cfg.fetch.targets)
+            targets_file = cfg.fetch.get("targets_file")
+            if targets_file and Path(targets_file).exists():
+                targets = yaml.safe_load(Path(targets_file).read_text()) or []
+                log.info("Loaded %d targets from %s", len(targets), targets_file)
+            else:
+                targets = list(cfg.fetch.targets)
             max_commits = cfg.fetch.get("max_commits", 1000)
             min_commits = cfg.fetch.get("min_commits", 50)
-            min_words = cfg.fetch.get("min_words", 3000)
+            min_words = cfg.fetch.get("min_words", 2000)
+            max_words = cfg.fetch.get("max_words", 6000)
+            timeout = cfg.fetch.timeout
             clone_dir = cfg.fetch.get("clone_dir") or tempfile.mkdtemp(prefix="gh_edit_history_")
             log.info("Clone dir: %s", clone_dir)
 
@@ -114,10 +123,10 @@ class GitHubDataset(Dataset):
                     continue
 
                 log.info("[fetch] %s:%s", repo, filepath)
-                history = _fetch_file_history(repo, filepath, clone_dir, max_commits)
+                history = _fetch_file_history(repo, filepath, clone_dir, max_commits, timeout)
 
-                kept = [h for h in history if len(h["text"].split()) >= min_words]
-                log.info("  %d versions -> %d with >= %d words", len(history), len(kept), min_words)
+                kept = [h for h in history if min_words <= len(h["text"].split()) <= max_words]
+                log.info("  %d versions -> %d with %d-%d words", len(history), len(kept), min_words, max_words)
 
                 if len(kept) < min_commits:
                     log.info("  Skipping: only %d versions (need %d)", len(kept), min_commits)
@@ -185,6 +194,12 @@ class GitHubDataset(Dataset):
             n_before = len(df)
             df = df.filter(pl.col("n_tokens") >= min_seq_len)
             log.info("Dropped %d revisions shorter than %d tokens", n_before - len(df), min_seq_len)
+
+        # Drop truncated (hit max_seq_len ceiling)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") < cfg.max_seq_len)
+        if n_before - len(df) > 0:
+            log.info("Dropped %d truncated revisions (>= %d tokens)", n_before - len(df), cfg.max_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

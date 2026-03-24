@@ -100,7 +100,8 @@ class WikipediaDataset(Dataset):
         if not cfg.get("skip_fetch", True):
             articles = list(cfg.fetch.articles)
             max_rev = cfg.fetch.get("max_revisions", 500)
-            min_words = cfg.fetch.get("min_words", 6000)
+            min_words = cfg.fetch.get("min_words", 4000)
+            max_words = cfg.fetch.get("max_words", 10000)
             for title in articles:
                 slug = _slug(title)
                 outpath = raw_dir / f"{slug}.jsonl"
@@ -110,8 +111,8 @@ class WikipediaDataset(Dataset):
                     continue
                 log.info("[fetch] %s (up to %d revisions)...", title, max_rev)
                 revisions = _fetch_revisions(title, max_rev)
-                kept = [r for r in revisions if len(r["text"].split()) >= min_words]
-                log.info("  %d total -> %d with >= %d words", len(revisions), len(kept), min_words)
+                kept = [r for r in revisions if min_words <= len(r["text"].split()) <= max_words]
+                log.info("  %d total -> %d with %d-%d words", len(revisions), len(kept), min_words, max_words)
                 with open(outpath, "w") as f:
                     for r in kept:
                         f.write(json.dumps(r) + "\n")
@@ -174,6 +175,12 @@ class WikipediaDataset(Dataset):
             n_before = len(df)
             df = df.filter(pl.col("n_tokens") >= min_seq_len)
             log.info("Dropped %d revisions shorter than %d tokens", n_before - len(df), min_seq_len)
+
+        # Drop truncated (hit max_seq_len ceiling)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") < cfg.max_seq_len)
+        if n_before - len(df) > 0:
+            log.info("Dropped %d truncated revisions (>= %d tokens)", n_before - len(df), cfg.max_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)
