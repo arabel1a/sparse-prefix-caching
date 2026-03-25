@@ -52,11 +52,12 @@ def _make_histogram_tracker(strategy, max_len):
             'histogram_exp_decay': 'exp_decay'}[stype]
     budget = strategy.n_blocks
     gamma = strategy.get('gamma', 0.99)
+    laplace_alpha = strategy.laplace_alpha
     replan_interval = strategy.get('replan_interval', 100)
     bin_size = strategy.get('bin_size', 1)
     log.info("histogram %s [%s]: budget=%d, bin_size=%d, max_len=%d",
              strategy.tag, stype, budget, bin_size, max_len)
-    return HistogramTracker(max_len, budget, mode=mode, gamma=gamma,
+    return HistogramTracker(max_len, budget, mode=mode, gamma=gamma, alpha=laplace_alpha,
                             replan_interval=replan_interval, bin_size=bin_size)
 
 

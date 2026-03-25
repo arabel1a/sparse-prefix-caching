@@ -157,11 +157,12 @@ class HistogramTracker:
     """
 
     def __init__(self, max_len, budget, mode='frozen', gamma=0.99,
-                 replan_interval=100, bin_size=1):
+                 replan_interval=100, alpha=1., bin_size=1):
         self.max_len = max_len
         self.budget = budget
         self.mode = mode
         self.gamma = gamma
+        self.alpha = alpha # laplace smoothing
         self.replan_interval = replan_interval
         self.bin_size = max(1, bin_size)
 
@@ -183,6 +184,10 @@ class HistogramTracker:
 
     def solve(self):
         """Solve DP on current (binned) histogram and cache the result."""
+        # laplace smoothing
+        max_bin_pos = np.argwhere(self.counts > 0).max().item()
+        self.n_obs += self.alpha * (max_bin_pos + 1)
+        self.counts[:max_bin_pos] += self.alpha
         bin_positions = solve_dp(self.counts, self.budget)
         self._positions = [_bin_to_pos(b, self.bin_size) for b in bin_positions]
         self._dirty = False
