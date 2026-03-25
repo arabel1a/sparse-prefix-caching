@@ -20,7 +20,7 @@ STRATEGIES = [
 def balanced_positions(seq_len, block_size=None, n_blocks=None):
     assert (block_size is None) != (n_blocks is None)
     if n_blocks is not None:
-        block_size = seq_len // n_blocks
+        block_size = seq_len // (n_blocks + 1)
     return list(range(block_size, seq_len + 1, block_size))
 
 def sqrt_positions(seq_len):
@@ -36,7 +36,40 @@ def diadic_positions(seq_len: int, start_at) -> list[int]:
         i += 1
     return positions
 
+def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start_at=0, skip=0,
+                         histogram_tracker=None,save_last=False, **_ignored):
+    """Return list of positions where GDN checkpoints should be captured.
 
+    Dispatches on `type` (the strategy type), not `tag` (the unique ID).
+    Accepts the full strategy config dict as kwargs
+    (e.g. ``checkpoint_positions(seq_len, **strategy)``).
+    """
+    if type == "no_cache":
+        return []
+
+    positions = []
+    if type == "kv_only":
+        pass  # no GDN checkpoints by default
+    elif seq_len < skip:
+        pass
+    elif type in ("block", "balanced_fix_blocksize"):
+        positions = balanced_positions(seq_len, block_size=block_size)
+    elif type == "balanced_fix_nblocks":
+        positions = balanced_positions(seq_len, n_blocks=n_blocks)
+    elif type == "sqrt":
+        positions = sqrt_positions(seq_len)
+    elif type in ("log", "dyadic", "diadic"):
+        positions = diadic_positions(seq_len, start_at)
+    elif type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
+        if histogram_tracker is None:
+            raise ValueError(f"Strategy type {type} requires a histogram_tracker")
+        positions = histogram_tracker.get_positions(seq_len)
+    else:
+        raise ValueError(f"Unknown strategy type: {type}")
+
+    if save_last and seq_len not in positions:
+        positions.append(seq_len)
+    return sorted(set(positions))
 # ---------------------------------------------------------------------------
 # DP-optimal checkpoint placement (Corollary 1 from the paper)
 # ---------------------------------------------------------------------------
@@ -182,37 +215,4 @@ class HistogramTracker:
         self.mode = 'frozen'
 
 
-def checkpoint_positions(seq_len, *, type, block_size=None, n_blocks=None, start_at=0, skip=0,
-                         histogram_tracker=None,save_last=False, **_ignored):
-    """Return list of positions where GDN checkpoints should be captured.
 
-    Dispatches on `type` (the strategy type), not `tag` (the unique ID).
-    Accepts the full strategy config dict as kwargs
-    (e.g. ``checkpoint_positions(seq_len, **strategy)``).
-    """
-    if type == "no_cache":
-        return []
-
-    positions = []
-    if type == "kv_only":
-        pass  # no GDN checkpoints by default
-    elif seq_len < skip:
-        pass
-    elif type in ("block", "balanced_fix_blocksize"):
-        positions = balanced_positions(seq_len, block_size=block_size)
-    elif type == "balanced_fix_nblocks":
-        positions = balanced_positions(seq_len, n_blocks=n_blocks)
-    elif type == "sqrt":
-        positions = sqrt_positions(seq_len)
-    elif type in ("log", "dyadic", "diadic"):
-        positions = diadic_positions(seq_len, start_at)
-    elif type in ("histogram_frozen", "histogram_periodic", "histogram_exp_decay"):
-        if histogram_tracker is None:
-            raise ValueError(f"Strategy type {type} requires a histogram_tracker")
-        positions = histogram_tracker.get_positions(seq_len)
-    else:
-        raise ValueError(f"Unknown strategy type: {type}")
-
-    if save_last and seq_len not in positions:
-        positions.append(seq_len)
-    return sorted(set(positions))

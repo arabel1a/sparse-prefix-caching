@@ -21,6 +21,7 @@ n_blocks_when_kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${
 
 strategies:
   - no_cache   # do not delete this strat - code assumes that it is used
+  - kv_only: {save_last:True, tag: "last_only"}
   - kv_only
   - balanced
   - balanced: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
