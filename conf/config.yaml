@@ -20,17 +20,17 @@ hydra:
 n_blocks_when_kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${model.r}), 2)'}
 
 strategies:
-  - no_cache   # do not delete this strat - code assumes that it is used
-  - kv_only: {save_last:True, tag: "last_only"}
-  - kv_only
-  - balanced
-  - balanced: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-  - block: {block_size: "${model.r}"}
-  # - log
-  - hist_frozen
-  - hist_frozen: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-  - hist_exp_decay
-  - hist_exp_decay: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
+  no_cache: {}   # do not delete this strat - code assumes that it is used
+  last_only: {_base_: kv_only, save_last: True}
+  kv_only: {}
+  balanced_1_0: {_base_: balanced}
+  balanced_equal: {_base_: balanced, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
+  block_r: {_base_: block, block_size: "${model.r}"}
+  # log: {}
+  hist_frozen_1: {_base_: hist_frozen}
+  hist_frozen_equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
+  hist_exp_decay_1: {_base_: hist_exp_decay}
+  hist_exp_decay_equal: {_base_: hist_exp_decay, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
  
 # Qwen3.5-0.8B dimensions
 model:

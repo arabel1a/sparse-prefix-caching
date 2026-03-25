@@ -1,6 +1,6 @@
 defaults:
-  _self_
-  base
+  - _self_
+  - base
 
 skip: 0 
 n_blocks: 1

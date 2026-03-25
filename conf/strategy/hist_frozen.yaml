@@ -1,6 +1,7 @@
 defaults:
-  _self_
-  base
+  - _self_
+  - base
+
 
 n_blocks: 1
 tag: "hist_frozen_${n_blocks}"

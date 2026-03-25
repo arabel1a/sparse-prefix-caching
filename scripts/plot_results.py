@@ -950,9 +950,8 @@ def plot_checkpoint_positions(out_dir, root_dir=None, style_map=None, **_kw):
                     ax.scatter(positions, [round_idx] * len(positions),
                                s=8, color=color, zorder=3, alpha=0.7)
                 pm = e["prefix_match"]
-                if pm > 0:
-                    ax.plot([pm, pm], [round_idx - 0.3, round_idx + 0.3],
-                            color="red", lw=1.2, alpha=0.6)
+                ax.plot([pm, pm], [round_idx - 0.3, round_idx + 0.3],
+                        zorder=999, color="red", lw=1.2, alpha=1.0)
 
             ax.set_title(label, fontsize=8)
             ax.set_yticks(range(len(entries)))

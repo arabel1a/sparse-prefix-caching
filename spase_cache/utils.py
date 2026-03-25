@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import yaml
 from omegaconf import DictConfig, OmegaConf
 
 OmegaConf.register_new_resolver("eval", eval, use_cache=True)
@@ -36,35 +35,36 @@ _STRATEGY_DIR = Path(__file__).resolve().parent.parent / "conf" / "strategy"
 
 
 def resolve_strategies(cfg):
-    """Resolve strategy name list into full strategy configs.
+    """Resolve strategy dict {tag: {overrides}} into a list of configs.
 
-    Each entry in cfg.strategies is either a plain string (strategy name)
-    or a single-key dict {name: {overrides}}.  We load the corresponding
-    YAML from conf/strategy/<name>.yaml and merge overrides on top.
+    Uses OmegaConf.load/merge so base.yaml defaults and ${} interpolations
+    work natively. ``_base_`` override selects which YAML to load (defaults
+    to the tag).
     """
+    base_cfg = OmegaConf.load(_STRATEGY_DIR / "base.yaml") if (_STRATEGY_DIR / "base.yaml").exists() else {}
+
     resolved = []
-    for entry in cfg.strategies:
-        if isinstance(entry, str):
-            name, overrides = entry, {}
-        else:
-            # single-key dict: {"hist_frozen": {"n_blocks": 2}}
-            name = list(entry.keys())[0]
-            overrides = dict(entry[name])
+    for tag, overrides in cfg.strategies.items():
+        # Resolve top-level interpolations (e.g. ${n_blocks_when_kvcache_equals_gdncache})
+        overrides = OmegaConf.to_container(overrides, resolve=True) if overrides else {}
+        name = overrides.pop("_base_", tag)
 
         yaml_path = _STRATEGY_DIR / f"{name}.yaml"
         if not yaml_path.exists():
             raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
 
-        with open(yaml_path) as f:
-            base = yaml.safe_load(f)
-        base.update(overrides)
-        # Resolve ${key} interpolations within each strategy dict
-        for k, v in base.items():
-            if isinstance(v, str) and "${" in v:
-                base[k] = v.replace("${", "{").format_map(base)
-        resolved.append(base)
+        strat_cfg = OmegaConf.load(yaml_path)
+        if "defaults" in strat_cfg:
+            del strat_cfg["defaults"]
 
-    OmegaConf.update(cfg, "strategies", resolved)
+        merged = OmegaConf.to_container(OmegaConf.merge(base_cfg, strat_cfg, overrides, {"tag": tag}))
+        # Resolve ${key} references to sibling keys within each strategy dict
+        for k, v in merged.items():
+            if isinstance(v, str) and "${" in v:
+                merged[k] = v.replace("${", "{").format_map(merged)
+        resolved.append(merged)
+
+    cfg.strategies = OmegaConf.create(resolved)
     log.info("resolved %d strategies: %s", len(resolved), [s["tag"] for s in resolved])
 
 

@@ -1,6 +1,7 @@
 defaults:
-  _self_
-  base
+  - _self_
+  - base
+
 
 tag: "kv_only"
 type: "kv_only"
