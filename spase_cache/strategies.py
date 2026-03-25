@@ -144,6 +144,17 @@ def _bin_to_pos(bin_idx, bin_size):
     return bin_idx * bin_size
 
 
+def laplace_smoothing(counts, alpha):
+    """Apply Laplace smoothing up to the last non-zero bin."""
+    smoothed = counts.copy()
+    nz = np.argwhere(smoothed > 0)
+    if len(nz) == 0:
+        return smoothed
+    max_bin_pos = nz.max().item()
+    smoothed[:max_bin_pos] += alpha
+    return smoothed
+
+
 class HistogramTracker:
     """Tracks overlap depth histogram for distribution-aware checkpointing.
 
@@ -171,6 +182,8 @@ class HistogramTracker:
         self.n_obs = 0
         self._positions = None  # cached DP solution (in token positions)
         self._dirty = True
+        self._n_solves = 0
+        self.histogram_log = []  # list of {n_obs, counts}
 
     def observe(self, overlap_depth):
         """Record an observed overlap depth."""
@@ -184,12 +197,14 @@ class HistogramTracker:
 
     def solve(self):
         """Solve DP on current (binned) histogram and cache the result."""
-        # laplace smoothing
-        max_bin_pos = np.argwhere(self.counts > 0).max().item()
-        self.n_obs += self.alpha * (max_bin_pos + 1)
-        self.counts[:max_bin_pos] += self.alpha
-        bin_positions = solve_dp(self.counts, self.budget)
+        self.histogram_log.append({
+            "n_obs": self.n_obs,
+            "counts": self.counts.copy(),
+        })
+        smoothed = laplace_smoothing(self.counts, self.alpha)
+        bin_positions = solve_dp(smoothed, self.budget)
         self._positions = [_bin_to_pos(b, self.bin_size) for b in bin_positions]
+        self._n_solves += 1
         self._dirty = False
         log.info("DP solved: %d ckpts, n_obs=%d, bin_size=%d, positions=%s",
                  len(self._positions), self.n_obs, self.bin_size, self._positions)

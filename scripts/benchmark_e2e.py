@@ -218,6 +218,13 @@ def run_strategy(model, dataset, strat, train_requests, test_requests,
     if res["hits"] > 0:
         log.info("    hits: %d/%d (%.1f%%)",
                  res["hits"], len(test_requests), res["hits"] / len(test_requests) * 100)
+    if hist_tracker is not None:
+        res["histogram_log"] = [
+            {"n_obs": entry["n_obs"], "counts": entry["counts"].tolist()}
+            for entry in hist_tracker.histogram_log
+        ]
+        res["laplace_alpha"] = float(strat.laplace_alpha)
+        res["bin_size"] = hist_tracker.bin_size
     return res
 
 
@@ -270,6 +277,14 @@ def main(cfg: DictConfig):
                            cfg.data.max_seq_len, progress)
 
         _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
+        if "histogram_log" in res:
+            hist_path = out_dir / f"e2e_{strat.tag}_histograms.json"
+            hist_path.write_text(json.dumps({
+                "histogram_log": res["histogram_log"],
+                "laplace_alpha": res["laplace_alpha"],
+                "bin_size": res["bin_size"],
+            }, indent=2))
+            log.info("Histogram log saved to %s", hist_path)
         summary["strategies"][strat.tag] = {
             "total_time": res["total_time"],
             "total_capture_time": res["total_capture_time"],

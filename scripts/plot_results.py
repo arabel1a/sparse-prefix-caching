@@ -1165,6 +1165,82 @@ def plot_cache_breakdown(out_dir, root_dir=None, style_map=None, **_kw):
 
 
 # ---------------------------------------------------------------------------
+# Histogram before/after Laplace smoothing
+# ---------------------------------------------------------------------------
+def plot_histograms(out_dir, root_dir=None, style_map=None, **_kw):
+    """Plot raw vs Laplace-smoothed histograms from histogram strategy solves."""
+    from spase_cache.strategies import laplace_smoothing
+
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping histograms plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+
+    # Find all histogram log files
+    hist_files = sorted(data_dir.glob("e2e_*_histograms.json"))
+    if not hist_files:
+        print("  no histogram log files found, skipping")
+        return
+
+    for hf in hist_files:
+        tag = hf.stem.replace("e2e_", "").replace("_histograms", "")
+        data = json.loads(hf.read_text())
+        entries = data["histogram_log"]
+        alpha = data["laplace_alpha"]
+        bin_size = data.get("bin_size", 1)
+
+        if not entries:
+            continue
+
+        n = len(entries)
+        fig, axes = plt.subplots(n, 2, figsize=(14, 3 * n), squeeze=False)
+
+        label = _spec(tag, style_map)[0] if style_map else tag
+
+        for i, entry in enumerate(entries):
+            counts = np.array(entry["counts"])
+            smoothed = laplace_smoothing(counts, alpha)
+            n_obs = entry["n_obs"]
+            x = np.arange(len(counts)) * bin_size
+
+            # Trim to last nonzero + some margin
+            last_nz = max(np.argwhere(counts > 0).max().item() if counts.max() > 0 else 0,
+                          np.argwhere(smoothed > 0).max().item() if smoothed.max() > 0 else 0)
+            trim = min(last_nz + 10, len(counts))
+
+            ax_raw = axes[i, 0]
+            ax_raw.bar(x[:trim], counts[:trim], width=bin_size * 0.8,
+                       color="steelblue", alpha=0.7, edgecolor="white")
+            ax_raw.set_title(f"Raw (solve #{i+1}, n_obs={n_obs})", fontsize=9)
+            ax_raw.set_ylabel("Count")
+            ax_raw.grid(True, alpha=0.3, axis="y")
+
+            ax_sm = axes[i, 1]
+            ax_sm.bar(x[:trim], smoothed[:trim], width=bin_size * 0.8,
+                      color="tab:orange", alpha=0.7, edgecolor="white")
+            ax_sm.set_title(f"Laplace smoothed (α={alpha})", fontsize=9)
+            ax_sm.set_ylabel("Count")
+            ax_sm.grid(True, alpha=0.3, axis="y")
+
+            if i == n - 1:
+                ax_raw.set_xlabel("Token position")
+                ax_sm.set_xlabel("Token position")
+
+        fig.suptitle(f"Histogram evolution — {label} — {model_name}", fontsize=12)
+        plt.tight_layout()
+        out = out_dir / f"histograms_{tag}.png"
+        plt.savefig(out, dpi=200, bbox_inches="tight")
+        print(f"  saved {out}")
+        plt.close()
+
+
+# ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
 def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
@@ -1179,6 +1255,7 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_checkpoint_positions(out_dir, root_dir=root_dir, style_map=style_map)
     plot_gdn_gap(out_dir, root_dir=root_dir, style_map=style_map)
     plot_cache_breakdown(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
 
 
 # ---------------------------------------------------------------------------

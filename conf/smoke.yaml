@@ -9,7 +9,7 @@ data:
   max_convs: 1
   max_rows: 4
   max_requests: 8
-  max_seq_len: 1000
+  max_seq_len: 8192
 
 benchmark_baselines:
   seq_lens: [128, 256, 512, 1024]
