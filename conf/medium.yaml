@@ -4,11 +4,10 @@ defaults:
 
 run_name: medium
 data:
-  max_rows: 10000
-  max_requests: 1000
-  max_convs: 10
+  max_rows: 100000
+  max_requests: 2000
+  max_convs: 100
 
-benchmark_baselines:
-  seq_lens: [1024, 4096, 16384]
-
-
+cache_manager:
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 10

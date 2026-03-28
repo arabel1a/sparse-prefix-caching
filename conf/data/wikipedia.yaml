@@ -7,8 +7,7 @@ name: wikipedia
 format: revision
 raw_dir: data/wikipedia
 processed: data/wikipedia_${run_name}.parquet
-max_revisions: 500    # max revisions per article
-min_seq_len: 8192     # drop revisions shorter than 8K tokens
+max_revisions: 100    # max revisions per article
 skip_fetch: True # false
 avg_req_len: 10000
 

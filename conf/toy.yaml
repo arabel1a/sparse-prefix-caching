@@ -9,14 +9,14 @@ data:
   interleave: false
   max_rows: 100
   max_requests: 100
-  max_convs: 1
+  max_convs: 10
 
 benchmark_baselines:
   seq_lens: [128, 256]
 
 cache_manager:
-  kv_budget_gb: 5
-  gdn_budget_gb: 0.5
-
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 5
+ 
 benchmark_e2e:
   warmup_seqs: 10

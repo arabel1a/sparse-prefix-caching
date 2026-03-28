@@ -7,8 +7,7 @@ name: github
 format: revision
 raw_dir: data/github
 processed: data/github_${run_name}.parquet
-max_revisions: 100    # max revisions per file (50-100 range)
-min_seq_len: 8192     # drop revisions shorter than 8K tokens
+max_revisions: 20    # max revisions per file (50-100 range)
 skip_fetch: True # false
 avg_req_len: 10000
 
