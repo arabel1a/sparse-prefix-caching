@@ -1,12 +1,11 @@
 defaults:
-  - _self_
   - base
-
+  - _self_
 
 n_blocks: 1
 tag: "hist_frozen_${n_blocks}"
 type: "histogram_frozen"
-bin_size: 128
+bin_size: 64
 label: "DP-optimal (frozen, ${n_blocks} block)"
 color: "tab:purple"
 marker: "X"

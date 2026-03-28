@@ -1,6 +1,6 @@
 defaults:
-  - _self_
   - base
+  - _self_
 
 block_size: 768
 tag: "block_${block_size}"

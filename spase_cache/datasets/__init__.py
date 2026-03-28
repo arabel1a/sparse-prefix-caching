@@ -7,3 +7,4 @@ from spase_cache.datasets.squad import SquadDataset
 from spase_cache.datasets.osst1 import Osst1Dataset
 from spase_cache.datasets.nemotron_swe import NemotronSweDataset
 from spase_cache.datasets.swe_agent import SweAgentDataset
+from spase_cache.datasets.synthetic import SyntheticDataset

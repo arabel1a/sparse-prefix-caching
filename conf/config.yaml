@@ -22,7 +22,8 @@ n_blocks_when_kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${
 strategies:
   no_cache: {}   # do not delete this strat - code assumes that it is used
   hist_frozen_1: {_base_: hist_frozen}
-  hist_frozen_equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
+  hist_frozen_1_smallbin: {_base_: hist_frozen, bin_size: 1, label: "Frozen hist, small bin"}
+  # hist_frozen_equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
   last_only: {_base_: kv_only, save_last: True}
   kv_only: {}
   balanced_1_0: {_base_: balanced}

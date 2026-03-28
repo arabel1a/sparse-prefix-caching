@@ -23,12 +23,16 @@ from spase_cache.utils import (
     setup_output_dir,
     resolve_strategies,
     make_model,
+    make_model_config,
+    gdn_checkpoint_bytes,
+    kv_per_token_bytes,
     prefill_baseline,
     _model_device,
     _sync_device,
     prefill_and_capture_at,
     PrefixCache,
     FixedSizeCache,
+    DryRunStore,
     _save_jsonl,
 )
 from spase_cache.strategies import checkpoint_positions, HistogramTracker
@@ -45,6 +49,87 @@ def _make_cache(cfg):
     """Instantiate cache manager from config."""
     cls = hydra.utils.get_class(cfg.cache_manager._target_)
     return cls(**{k: v for k, v in cfg.cache_manager.items() if k != "_target_"})
+
+
+def simulate_dry(dataset, requests, vocab_size, strategy, cache,
+                 kv_bytes_per_tok, gdn_bytes_per_ckpt,
+                 progress=False, histogram_tracker=None, warmup=False):
+    """Dry-run: simulate cache behavior without model, approximate cost as tokens to process."""
+    uses_cache = strategy.type != "no_cache"
+    is_hist = _is_histogram_strategy(strategy.type)
+    online_hist = is_hist and strategy.type != 'histogram_frozen' and not warmup
+    per_request = []
+
+    for req in tqdm(requests, desc=f"{strategy.tag}{' warmup' if warmup else ''}",
+                    disable=not progress):
+        conv_id = dataset.conv_id(req)
+        all_toks = dataset.get_tokens(req)
+        input_ids = torch.tensor(all_toks, dtype=torch.long) % vocab_size
+        seq_len = len(input_ids)
+
+        hit = False
+        tokens_saved = 0
+        match_len = 0
+        reusable_kv = 0
+        reusable_gdn = 0
+
+        if uses_cache:
+            cached_store, match_len = cache.find_best_prefix(conv_id, input_ids)
+
+            if is_hist and histogram_tracker is not None:
+                histogram_tracker.observe(match_len)
+
+            if cached_store is not None:
+                hit = True
+                kv_len = min(cached_store.kv_len, seq_len, match_len)
+                reusable_kv = kv_len
+                best_pos = cached_store.best_checkpoint(kv_len)
+                if best_pos is not None:
+                    tokens_saved = best_pos
+                    reusable_gdn = best_pos
+        elif is_hist and histogram_tracker is not None:
+            histogram_tracker.observe(0)
+
+        positions = []
+        if uses_cache:
+            positions = checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
+            store = DryRunStore(input_ids, positions, kv_bytes_per_tok, gdn_bytes_per_ckpt)
+            cache.put(conv_id, store)
+
+        tokens_to_process = seq_len - tokens_saved
+        dt = tokens_to_process * 0.05  # 1 token ≈ 50ms
+
+        per_request.append({
+            "conv_id": str(conv_id), "seq_len": seq_len,
+            "added_positions": positions,
+            "seq_len": seq_len,
+            "time_s": dt, "capture_s": 0.0, "hit": hit,
+            "tokens_saved": tokens_saved,
+            "tokens_to_process": tokens_to_process,
+            "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
+            "prefix_match": match_len,
+            "n_cache_entries": cache.n_entries,
+            "cache_kv_bytes": cache.kv_used,
+            "cache_gdn_bytes": cache.gdn_used,
+        })
+
+    if warmup and is_hist and histogram_tracker is not None:
+        if strategy.type == 'histogram_frozen':
+            histogram_tracker.freeze()
+        else:
+            histogram_tracker.solve()
+
+    total_time = sum(e["time_s"] for e in per_request)
+    return {
+        "total_time": total_time,
+        "total_capture_time": 0.0,
+        "wall_time": total_time,
+        "hits": sum(1 for e in per_request if e["hit"]),
+        "tokens_saved": sum(e["tokens_saved"] for e in per_request),
+        "tokens_total": sum(e["seq_len"] for e in per_request),
+        "cache_stats": cache.stats(),
+        "per_request": per_request,
+    }
 
 
 def _is_histogram_strategy(stype):
@@ -232,16 +317,56 @@ def run_strategy(model, dataset, strat, train_requests, test_requests,
     return res
 
 
+def run_strategy_dry(dataset, strat, train_requests, test_requests,
+                     vocab_size, cfg, max_seq_len, progress):
+    """Dry-run a single strategy: no model, approximate cost as token counts."""
+    hist_tracker = None
+    if _is_histogram_strategy(strat.type):
+        hist_tracker = _make_histogram_tracker(strat, max_seq_len)
+
+    config = make_model_config(cfg)
+    kv_bpt = kv_per_token_bytes(config)
+    gdn_bpc = gdn_checkpoint_bytes(config)
+
+    cache = _make_cache(cfg)
+    log.info("Strategy: %s — dry warmup...", strat.tag)
+    simulate_dry(dataset, train_requests, vocab_size, strat, cache,
+                 kv_bpt, gdn_bpc, progress=progress,
+                 histogram_tracker=hist_tracker, warmup=True)
+    log.info("Strategy: %s — dry eval...", strat.tag)
+    res = simulate_dry(dataset, test_requests, vocab_size, strat, cache,
+                       kv_bpt, gdn_bpc, progress=progress,
+                       histogram_tracker=hist_tracker)
+
+    tok_total = res["tokens_total"]
+    tok_saved = res["tokens_saved"]
+    log.info("  %s: tokens_saved=%d/%d (%.1f%%)",
+             strat.tag, tok_saved, tok_total,
+             tok_saved / tok_total * 100 if tok_total > 0 else 0)
+    if hist_tracker is not None:
+        res["histogram_log"] = [
+            {"n_obs": entry["n_obs"], "counts": entry["counts"].tolist()}
+            for entry in hist_tracker.histogram_log
+        ]
+        res["laplace_alpha"] = float(strat.laplace_alpha)
+        res["bin_size"] = hist_tracker.bin_size
+    return res
+
+
 @hydra.main(config_path=r"../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     out_dir = setup_output_dir(cfg, "benchmark_e2e")
     resolve_strategies(cfg)
-    model = make_model(cfg)
-    config = model.config
     e2e = cfg.benchmark_e2e
+    dry_run = e2e.get("dry_run", False)
     strategies = list(cfg.strategies)
     progress = e2e.get("progress", True)
-    vocab_size = config.vocab_size
+
+    if dry_run:
+        vocab_size = cfg.model.vocab_size
+    else:
+        model = make_model(cfg)
+        vocab_size = model.config.vocab_size
 
     # Load dataset (interleaving happens inside)
     dataset = _make_dataset(cfg)
@@ -249,12 +374,13 @@ def main(cfg: DictConfig):
     train_requests, test_requests = dataset.train_test_split()
 
     total_tokens = sum(len(dataset.get_tokens(r)) for r in test_requests)
-    log.info("Train: %d, Test: %d requests, test tokens: %d, cache: %s",
+    log.info("Train: %d, Test: %d requests, test tokens: %d, cache: %s%s",
              len(train_requests), len(test_requests), total_tokens,
-             cfg.cache_manager._target_)
+             cfg.cache_manager._target_, " [DRY RUN]" if dry_run else "")
 
     summary = {
         "model_name": cfg.model.name,
+        "dry_run": dry_run,
         "n_train_requests": len(train_requests),
         "n_test_requests": len(test_requests),
         "total_tokens": total_tokens,
@@ -265,18 +391,22 @@ def main(cfg: DictConfig):
     }
     summary_path = out_dir / "e2e_summary.json"
 
-    # initial warmup to alleviate gpu clock control, etc
-    print("Warming up cores")
-    cache = _make_cache(cfg)
-    cache = warmup_cache(model, dataset, train_requests[:e2e.warmup_seqs], vocab_size,
-                   strategies[0], cache, progress=progress)
-    simulate(model, dataset, test_requests[:e2e.warmup_seqs], vocab_size,
-                    strategies[0], cache, progress=progress)
+    if not dry_run:
+        # initial warmup to alleviate gpu clock control, etc
+        print("Warming up cores")
+        cache = _make_cache(cfg)
+        cache = warmup_cache(model, dataset, train_requests[:e2e.warmup_seqs], vocab_size,
+                       strategies[0], cache, progress=progress)
+        simulate(model, dataset, test_requests[:e2e.warmup_seqs], vocab_size,
+                        strategies[0], cache, progress=progress)
 
     for strat in strategies:
-        res = run_strategy(model, dataset, strat, train_requests, test_requests,
-                           vocab_size, cfg,
-                           cfg.data.max_seq_len, progress)
+        if dry_run:
+            res = run_strategy_dry(dataset, strat, train_requests, test_requests,
+                                   vocab_size, cfg, cfg.data.max_seq_len, progress)
+        else:
+            res = run_strategy(model, dataset, strat, train_requests, test_requests,
+                               vocab_size, cfg, cfg.data.max_seq_len, progress)
 
         _save_jsonl(out_dir / f"e2e_{strat.tag}.jsonl", res["per_request"])
         if "histogram_log" in res:

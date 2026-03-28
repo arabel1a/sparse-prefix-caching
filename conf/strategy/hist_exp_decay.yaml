@@ -1,7 +1,6 @@
 defaults:
-  - _self_
   - base
-
+  - _self_
 
 n_blocks: 1
 
