@@ -18,36 +18,18 @@ hydra:
 
 
 n_blocks_when_kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${model.r}), 2)'}
-n_blocks_when_kvcache_equals_2gdncache: ${eval:'max(int(${data.avg_req_len} // ${model.r} // 2), 2)'}
-n_blocks_when_2kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${model.r} * 2), 2)'}
 
 strategies:
   no_cache: {}   # do not delete this strat - code assumes that it is used
-  hist_frozen_1: {_base_: hist_frozen}
-  hist_frozen_1_smallbin: {_base_: hist_frozen, bin_size: 1, label: "Frozen hist, small bin"}
-  hist_frozen_2equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_2kvcache_equals_gdncache}"}
-  hist_frozen_equal2: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_2gdncache}"}
-  hist_frozen_equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-
-  hist_frozen_2equal_bs1024: {bin_size: 1024, _base_: hist_frozen, n_blocks: "${n_blocks_when_2kvcache_equals_gdncache}"}
-  hist_frozen_equal2_bs1024: {bin_size: 1024, _base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_2gdncache}"}
-  hist_frozen_equal_bs1024: {bin_size: 1024, _base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-
-  hist_frozen_2equal_bs512: {bin_size: 512, _base_: hist_frozen, n_blocks: "${n_blocks_when_2kvcache_equals_gdncache}"}
-  hist_frozen_equal2_bs512: {bin_size: 512, _base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_2gdncache}"}
-  hist_frozen_equal_bs512: {bin_size: 512, _base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-
+  # hist_frozen_1: {_base_: hist_frozen}
+  # hist_frozen_equal: {_base_: hist_frozen, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
+  hist_1: {_base_: hist_exp_decay}
+  hist_equal: {_base_: hist_exp_decay, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
   last_only: {_base_: kv_only, save_last: True}
   kv_only: {}
-  balanced_1_0: {_base_: balanced}
-  
+  balanced_1: {_base_: balanced}
   balanced_equal: {_base_: balanced, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-  balanced_equal2: {_base_: balanced, n_blocks: "${n_blocks_when_kvcache_equals_2gdncache}"}
-  balanced_2equal: {_base_: balanced, n_blocks: "${n_blocks_when_2kvcache_equals_gdncache}"}
- 
   block_r: {_base_: block, block_size: "${model.r}"}
-  block_r2: {_base_: block, block_size: 384}
-  block_2r: {_base_: block, block_size: 1366}
   
   # log: {}
   # hist_exp_decay_1: {_base_: hist_exp_decay}

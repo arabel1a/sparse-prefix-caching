@@ -1,0 +1,12 @@
+defaults:
+  - _self_
+  - base
+
+_target_: spase_cache.datasets.single_doc_qa.MuLDDataset
+name: muld
+format: revision
+processed: data/muld_${run_name}.parquet
+subset: NarrativeQA
+min_questions: 2
+split: train
+avg_req_len: 8000

@@ -10,4 +10,4 @@ data:
 
 cache_manager:
   _target_: spase_cache.utils.FixedSizeCache
-  max_cached_sequences: 10
+  max_cached_sequences: 5
