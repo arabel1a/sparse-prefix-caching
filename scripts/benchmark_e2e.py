@@ -146,8 +146,10 @@ def _make_histogram_tracker(strategy, max_len):
     bin_size = strategy['bin_size']
     log.info("histogram %s [%s]: budget=%d, bin_size=%d, max_len=%d",
              strategy.tag, stype, budget, bin_size, max_len)
+    adaptive_backtrack = strategy['adaptive_backtrack']
     return HistogramTracker(max_len, budget, mode=mode, gamma=gamma, alpha=laplace_alpha,
-                            replan_interval=replan_interval, bin_size=bin_size)
+                            replan_interval=replan_interval, bin_size=bin_size,
+                            adaptive_backtrack=adaptive_backtrack)
 
 
 def warmup_cache(model, dataset, requests, vocab_size, strategy, cache,

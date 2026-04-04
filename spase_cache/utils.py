@@ -54,7 +54,7 @@ def resolve_strategies(cfg):
             raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
 
         strat_cfg = OmegaConf.load(yaml_path)
-        merged = OmegaConf.to_container(OmegaConf.merge(strategy_defaults, strat_cfg, overrides, {"tag": tag}))
+        merged = OmegaConf.to_container(OmegaConf.merge(strat_cfg, strategy_defaults, overrides, {"tag": tag}))
         # Resolve ${key} references to sibling keys within each strategy dict
         for k, v in merged.items():
             if isinstance(v, str) and "${" in v:

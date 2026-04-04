@@ -1,4 +1,4 @@
-block_size: 768
+block_size: 64
 tag: "block_${block_size}"
 type: "balanced_fix_blocksize"
 family_label: "Block"

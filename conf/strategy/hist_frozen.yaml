@@ -8,3 +8,4 @@ family_label: "DP-frozen"
 label: "DP-frozen (${n_blocks} blocks, bin=${bin_size})"
 color: "tab:purple"
 marker: "X"
+adaptive_backtrack: True

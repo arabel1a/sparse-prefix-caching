@@ -2,7 +2,7 @@ n_blocks: 1
 
 tag: "hist_exp_decay_${n_blocks}"
 type: "histogram_exp_decay"
-bin_size: 128
+bin_size: 64
 gamma: 0.99
 replan_interval: 10
 family_label: "DP-optimal"
@@ -10,3 +10,4 @@ label: "DP-optimal (${n_blocks} blocks, γ=0.99)"
 color: "tab:olive"
 marker: "*"
 linestyle: "--"
+adaptive_backtrack: True

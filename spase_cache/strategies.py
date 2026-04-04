@@ -172,7 +172,8 @@ class HistogramTracker:
     """
 
     def __init__(self, max_len, budget, mode='frozen', gamma=0.99,
-                 replan_interval=100, alpha=1., bin_size=1):
+                 replan_interval=100, alpha=1., bin_size=1,
+                 adaptive_backtrack=True):
         self.max_len = max_len
         self.budget = budget
         self.mode = mode
@@ -180,11 +181,13 @@ class HistogramTracker:
         self.alpha = alpha # laplace smoothing
         self.replan_interval = replan_interval
         self.bin_size = max(1, bin_size)
+        self.adaptive_backtrack = adaptive_backtrack
 
         n_bins = max_len // self.bin_size + 1
         self.counts = np.zeros(n_bins, dtype=np.float64)
         self.n_obs = 0
         self._dp_result = None  # (all_back, N, M) from solve_dp
+        self._fixed_positions = None  # used when adaptive_backtrack=False
         self._dirty = True
         self._n_solves = 0
         self.histogram_log = []  # list of {n_obs, counts}
@@ -208,14 +211,15 @@ class HistogramTracker:
         smoothed = laplace_smoothing(self.counts, self.alpha)
         self._dp_result = solve_dp(smoothed, self.budget)
         if self._dp_result is None:
-            # degenerate histogram — balanced fallback will be used
             log.info("DP solve: degenerate histogram, using balanced fallback")
         else:
             _, N, M = self._dp_result
             positions = self._backtrack_bins(N)
+            token_positions = [_bin_to_pos(b, self.bin_size) for b in positions]
             log.info("DP solved: %d ckpts, n_obs=%d, bin_size=%d, positions=%s",
-                     len(positions), self.n_obs, self.bin_size,
-                     [_bin_to_pos(b, self.bin_size) for b in positions])
+                     len(positions), self.n_obs, self.bin_size, token_positions)
+            if not self.adaptive_backtrack:
+                self._fixed_positions = token_positions
         self._backtrack_bins.cache_clear()
         self._n_solves += 1
         self._dirty = False
@@ -243,6 +247,9 @@ class HistogramTracker:
 
         if should_solve:
             self.solve()
+
+        if not self.adaptive_backtrack and self._fixed_positions is not None:
+            return [p for p in self._fixed_positions if 0 < p <= seq_len]
 
         j_bin = seq_len // self.bin_size
         bin_positions = self._backtrack_bins(j_bin)

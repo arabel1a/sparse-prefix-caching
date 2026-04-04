@@ -9,3 +9,4 @@ label: "DP-periodic (H=100)"
 color: "tab:brown"
 marker: "P"
 linestyle: "--"
+adaptive_backtrack: True

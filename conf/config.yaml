@@ -15,12 +15,12 @@ hydra:
     dir: ${output_dir}
   output_subdir: hydra  # saves hydra config into ${output_dir}/hydra/
 
-
 strategy_defaults:
   save_last: False
-  laplace_alpha: 1
+  laplace_alpha: 0
   linestyle: "-"
   linewidth: 2
+  adaptive_backtrack: False
 
 strategies:
   no_cache: {}   # do not delete this strat - code assumes that it is used
@@ -58,7 +58,7 @@ benchmark_baselines:
 
 cache_manager:
   _target_: spase_cache.utils.FixedSizeCache
-  max_cached_sequences: 10
+  max_cached_sequences: 20
   # _target_: spase_cache.utils.PrefixCache
   # kv_budget_gb: 5.0
   # gdn_budget_gb: 5.0
