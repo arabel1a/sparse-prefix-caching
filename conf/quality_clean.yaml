@@ -3,53 +3,53 @@ defaults:
   - data: quality
   - _self_
 
-run_name: paretto_plot
-overwrite: True
+run_name: clean
 log_level: WARNING
 
+strategy_defaults:
+  laplace_alpha: 0
+ 
 data:
-  interleave: False
-  max_seq_len: 128000
-  max_convs: 1000
-  max_rows: 10000
+  interleave: True
+  max_seq_len: 16384
+  max_rows: 1000
 
 strategies:
   no_cache: {}
   log: {}
   sqrt: {}
-  # Block
   block_64: {_base_: block, block_size: 64}
-  block_128: {_base_: block, block_size: 128}
+  dp_300: {_base_: hist_exp_decay, n_blocks: 300}
+  balanced_300: {_base_: balanced, n_blocks: 300}
+  # Block
+  block_192: {_base_: block, block_size: 192}
   block_256: {_base_: block, block_size: 256}
   block_512: {_base_: block, block_size: 512}
   block_1024: {_base_: block, block_size: 1024}
   block_2048: {_base_: block, block_size: 2048}
   block_4096: {_base_: block, block_size: 4096}
   # Balanced
+  balanced_1:  {_base_: balanced, n_blocks: 1}
+  balanced_2:  {_base_: balanced, n_blocks: 2}
+  balanced_3:  {_base_: balanced, n_blocks: 3}
   balanced_5:  {_base_: balanced, n_blocks: 5}
-  balanced_8:  {_base_: balanced, n_blocks: 8}
   balanced_12: {_base_: balanced, n_blocks: 12}
-  balanced_16: {_base_: balanced, n_blocks: 16}
   balanced_20: {_base_: balanced, n_blocks: 20}
-  balanced_25: {_base_: balanced, n_blocks: 25}
   balanced_30: {_base_: balanced, n_blocks: 30}
-  balanced_40: {_base_: balanced, n_blocks: 40}
-  balanced_50: {_base_: balanced, n_blocks: 50}
-  balanced_70: {_base_: balanced, n_blocks: 70}
   # DP-optimal
+  dp_1:  {_base_: hist_exp_decay, n_blocks: 1}
+  dp_2:  {_base_: hist_exp_decay, n_blocks: 2}
+  dp_3:  {_base_: hist_exp_decay, n_blocks: 3}
   dp_5:  {_base_: hist_exp_decay, n_blocks: 5}
   dp_8:  {_base_: hist_exp_decay, n_blocks: 8}
   dp_12: {_base_: hist_exp_decay, n_blocks: 12}
-  dp_16: {_base_: hist_exp_decay, n_blocks: 16}
-  dp_20: {_base_: hist_exp_decay, n_blocks: 20}
-  dp_25: {_base_: hist_exp_decay, n_blocks: 25}
+  dp_25: {_base_: hist_exp_decay, n_blocks: 20}
   dp_30: {_base_: hist_exp_decay, n_blocks: 30}
-  dp_40: {_base_: hist_exp_decay, n_blocks: 40}
-  dp_50: {_base_: hist_exp_decay, n_blocks: 50}
-  dp_70: {_base_: hist_exp_decay, n_blocks: 70}
-
-benchmark_e2e:
-  dry_run: true
 
 plot_results:
-  _target_: plot_results.plot_pareto
+ _target_: plot_results.plot_pareto_broken
+ break_at: 35
+
+cache_manager:
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 20

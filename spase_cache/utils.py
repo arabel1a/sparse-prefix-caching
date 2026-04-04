@@ -41,7 +41,7 @@ def resolve_strategies(cfg):
     work natively. ``_base_`` override selects which YAML to load (defaults
     to the tag).
     """
-    base_cfg = OmegaConf.load(_STRATEGY_DIR / "base.yaml") if (_STRATEGY_DIR / "base.yaml").exists() else {}
+    strategy_defaults = OmegaConf.to_container(cfg.strategy_defaults, resolve=True)
 
     resolved = []
     for tag, overrides in cfg.strategies.items():
@@ -54,10 +54,7 @@ def resolve_strategies(cfg):
             raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
 
         strat_cfg = OmegaConf.load(yaml_path)
-        if "defaults" in strat_cfg:
-            del strat_cfg["defaults"]
-
-        merged = OmegaConf.to_container(OmegaConf.merge(base_cfg, strat_cfg, overrides, {"tag": tag}))
+        merged = OmegaConf.to_container(OmegaConf.merge(strategy_defaults, strat_cfg, overrides, {"tag": tag}))
         # Resolve ${key} references to sibling keys within each strategy dict
         for k, v in merged.items():
             if isinstance(v, str) and "${" in v:

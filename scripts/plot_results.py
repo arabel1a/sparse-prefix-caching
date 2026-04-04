@@ -1267,6 +1267,153 @@ def _load_jsonl_stats(data_dir, tag):
     return avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s
 
 
+def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_kw):
+    """Pareto front with a broken x-axis: [0, break_at] then [break_at+gap, max].
+
+    ``break_at`` is the n_blocks threshold separating the two panels.
+    Strategies with avg_n_blocks <= break_at go to the left panel,
+    the rest go to the right panel.
+    """
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping pareto_broken plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    sidx = _build_style_index(summary)
+
+    SKIP_TYPES = {"kv_only", "no_cache"}
+
+    # Collect: type -> [(tag, avg_n_blocks, saved%, avg_gdn, avg_speedup, total_speedup, total_time_s)]
+    families = {}
+    for tag, stats in summary["strategies"].items():
+        cfg = sidx[tag]
+        stype = cfg["type"]
+        if stype in SKIP_TYPES:
+            continue
+        tok_saved_frac = stats["tokens_saved"] / stats["tokens_total"] * 100 if stats["tokens_total"] > 0 else 0
+        avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s = _load_jsonl_stats(data_dir, tag)
+        families.setdefault(stype, []).append((tag, avg_nb, tok_saved_frac, avg_gdn, avg_speedup, total_speedup, total_time_s))
+
+    if not families:
+        print("  no budgeted strategies found, skipping pareto_broken plot")
+        return
+
+    # Split points into left (<=break_at) and right (>break_at)
+    all_right_x = []
+    for points in families.values():
+        for p in points:
+            if p[1] > break_at:
+                all_right_x.append(p[1])
+
+    if not all_right_x:
+        # Nothing beyond break_at — fall back to normal pareto
+        plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
+        return
+
+    right_lo = min(all_right_x) * 0.9
+    right_hi = max(all_right_x) * 1.1
+
+    # --- Helper to draw one metric on a broken-axis figure ---
+    def _draw_broken(ylabel, title_suffix, y_idx, out_name):
+        fig, (ax_l, ax_r) = plt.subplots(
+            1, 2, sharey=True, figsize=(10, 6),
+            gridspec_kw={"width_ratios": [3, 1], "wspace": 0.08},
+        )
+
+        for stype, points in sorted(families.items()):
+            points.sort(key=lambda x: x[1])
+            rep_tag = points[0][0]
+            _, color, marker, ls, lw = _spec(rep_tag, style_map)
+            fam = _family_label(rep_tag, style_map)
+
+            xs = [p[1] for p in points]
+            ys = [p[y_idx] for p in points]
+
+            # Plot the full series on BOTH axes (matplotlib clips to xlim)
+            ax_l.plot(xs, ys, color=color, marker=marker, ls=ls, lw=lw,
+                      markersize=8, label=fam, zorder=3)
+            ax_r.plot(xs, ys, color=color, marker=marker, ls=ls, lw=lw,
+                      markersize=8, zorder=3)
+
+        ax_l.set_xlim(0, break_at * 1.05)
+        ax_r.set_xlim(right_lo, right_hi)
+
+        # Diagonal break marks on axes
+        d = 0.015
+        kwargs = dict(transform=ax_l.transAxes, color="k", clip_on=False, lw=1)
+        ax_l.plot((1 - d, 1 + d), (-d, +d), **kwargs)
+        ax_l.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
+        kwargs["transform"] = ax_r.transAxes
+        ax_r.plot((-d, +d), (-d, +d), **kwargs)
+        ax_r.plot((-d, +d), (1 - d, 1 + d), **kwargs)
+
+        # Draw "//" break indicator between panels for each family that spans the break
+        for stype, points in sorted(families.items()):
+            points.sort(key=lambda x: x[1])
+            xs = [p[1] for p in points]
+            ys = [p[y_idx] for p in points]
+            has_left = any(x <= break_at for x in xs)
+            has_right = any(x > break_at for x in xs)
+            if not (has_left and has_right):
+                continue
+            rep_tag = points[0][0]
+            _, color, _, _, _ = _spec(rep_tag, style_map)
+            # Find the last left point and first right point
+            last_left_y = [y for x, y in zip(xs, ys) if x <= break_at][-1]
+            first_right_y = [y for x, y in zip(xs, ys) if x > break_at][0]
+            # Interpolate y at the midpoint of the gap (in figure coords)
+            mid_y = (last_left_y + first_right_y) / 2
+            # Place "//" text in the gap using figure-level coordinates
+            # Convert data y to figure y via ax_l
+            fig_y = ax_l.transData.transform((0, mid_y))[1]
+            fig_y = fig.transFigure.inverted().transform((0, fig_y))[1]
+            # x position: midpoint between the two axes
+            bbox_l = ax_l.get_position()
+            bbox_r = ax_r.get_position()
+            fig_x = (bbox_l.x1 + bbox_r.x0) / 2
+            fig.text(fig_x, fig_y, "//", ha="center", va="center",
+                     fontsize=11, fontweight="bold", color=color, rotation=15)
+
+        ax_l.spines["right"].set_visible(False)
+        ax_r.spines["left"].set_visible(False)
+        ax_r.tick_params(left=False)
+
+        ax_l.set_xlabel("Avg number of GDN checkpoints")
+        ax_l.set_ylabel(ylabel)
+        ax_r.set_xlabel("")
+        fig.suptitle(f"Pareto front: {title_suffix}", fontsize=13)
+
+        # Legend from left axis only (it has all families)
+        ax_l.legend(fontsize=9)
+
+        ax_l.grid(True, alpha=0.3)
+        ax_r.grid(True, alpha=0.3)
+
+        out_path = out_dir / out_name
+        fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        print(f"  saved {out_path}")
+        plt.close(fig)
+
+    # Panel: total savings
+    _draw_broken("Total savings (\u00d7)", "total savings vs checkpoint budget", 5, "pareto_broken_total_savings.png")
+    # Panel: total time
+    _draw_broken("Total processing time (s)", f"total time vs checkpoint budget \u2014 {model_name}", 6, "pareto_broken_total_time.png")
+
+    # Print table (same as plot_pareto)
+    print(f"\n  {'Strategy':<30} {'Avg n_blk':>9} {'Saved%':>8} {'Avg spd':>8} {'Tot spd':>8} {'Tot time':>10} {'Avg GDN (MB)':>12}")
+    print(f"  {'-'*91}")
+    for stype, points in sorted(families.items()):
+        points.sort(key=lambda x: x[1])
+        for tag, nb, saved, gdn, avg_spd, tot_spd, tot_time in points:
+            label = _spec(tag, style_map)[0]
+            print(f"  {label:<30} {nb:>9.1f} {saved:>7.1f}% {avg_spd:>7.2f}\u00d7 {tot_spd:>7.2f}\u00d7 {tot_time:>9.1f}s {gdn/1024/1024:>11.2f}")
+
+
 def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
     """Plot Pareto front: tokens_saved (%) vs avg GDN cache size."""
     out_dir = Path(out_dir)
@@ -1301,66 +1448,66 @@ def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
         return
 
     # --- Panel 1: tokens_saved% vs avg n_blocks ---
-    fig1, ax1 = plt.subplots(figsize=(8, 6))
-    for stype, points in sorted(families.items()):
-        points.sort(key=lambda x: x[1])
-        rep_tag = points[0][0]
-        _, color, marker, ls, lw = _spec(rep_tag, style_map)
-        fam = _family_label(rep_tag, style_map)
-        ax1.plot([p[1] for p in points], [p[2] for p in points],
-                 color=color, marker=marker, ls=ls, lw=lw,
-                 markersize=8, label=fam, zorder=3)
-    ax1.set_xlabel("Avg number of GDN checkpoints")
-    ax1.set_ylabel("Tokens saved (%)")
-    ax1.set_title(f"Pareto front: savings vs checkpoint budget — {model_name}")
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
-    out1 = out_dir / "pareto_nblocks.png"
-    fig1.savefig(out1, dpi=200, bbox_inches="tight")
-    print(f"  saved {out1}")
-    plt.close(fig1)
-
+    # fig1, ax1 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # ax1.plot([p[1] for p in points], [p[2] for p in points],
+                 # color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax1.set_xlabel("Avg number of GDN checkpoints")
+    # ax1.set_ylabel("Tokens saved (%)")
+    # ax1.set_title(f"Pareto front: savings vs checkpoint budget — {model_name}")
+    # ax1.legend(fontsize=9)
+    # ax1.grid(True, alpha=0.3)
+    # out1 = out_dir / "pareto_nblocks.png"
+    # fig1.savefig(out1, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out1}")
+    # plt.close(fig1)
+ 
     # --- Panel 2: tokens_saved% vs avg GDN cache size (MB) ---
-    fig2, ax2 = plt.subplots(figsize=(8, 6))
-    for stype, points in sorted(families.items()):
-        points.sort(key=lambda x: x[1])
-        rep_tag = points[0][0]
-        _, color, marker, ls, lw = _spec(rep_tag, style_map)
-        fam = _family_label(rep_tag, style_map)
-        gdn_mb = [p[3] / 1024 / 1024 for p in points]
-        saved = [p[2] for p in points]
-        ax2.plot(gdn_mb, saved, color=color, marker=marker, ls=ls, lw=lw,
-                 markersize=8, label=fam, zorder=3)
-    ax2.set_xlabel("Avg GDN cache size (MB)")
-    ax2.set_ylabel("Tokens saved (%)")
-    ax2.set_title(f"Pareto front: savings vs GDN memory — {model_name}")
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
-    out2 = out_dir / "pareto_gdn_mb.png"
-    fig2.savefig(out2, dpi=200, bbox_inches="tight")
-    print(f"  saved {out2}")
-    plt.close(fig2)
-
+    # fig2, ax2 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # gdn_mb = [p[3] / 1024 / 1024 for p in points]
+        # saved = [p[2] for p in points]
+        # ax2.plot(gdn_mb, saved, color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax2.set_xlabel("Avg GDN cache size (MB)")
+    # ax2.set_ylabel("Tokens saved (%)")
+    # ax2.set_title(f"Pareto front: savings vs GDN memory — {model_name}")
+    # ax2.legend(fontsize=9)
+    # ax2.grid(True, alpha=0.3)
+    # out2 = out_dir / "pareto_gdn_mb.png"
+    # fig2.savefig(out2, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out2}")
+    # plt.close(fig2)
+ 
     # --- Panel 3: avg theoretical speedup vs avg n_blocks ---
-    fig3, ax3 = plt.subplots(figsize=(8, 6))
-    for stype, points in sorted(families.items()):
-        points.sort(key=lambda x: x[1])
-        rep_tag = points[0][0]
-        _, color, marker, ls, lw = _spec(rep_tag, style_map)
-        fam = _family_label(rep_tag, style_map)
-        ax3.plot([p[1] for p in points], [p[4] for p in points],
-                 color=color, marker=marker, ls=ls, lw=lw,
-                 markersize=8, label=fam, zorder=3)
-    ax3.set_xlabel("Avg number of GDN checkpoints")
-    ax3.set_ylabel("Avg per-request speedup (×)")
-    ax3.set_title(f"Pareto front: avg speedup vs checkpoint budget — {model_name}")
-    ax3.legend(fontsize=9)
-    ax3.grid(True, alpha=0.3)
-    out3 = out_dir / "pareto_speedup.png"
-    fig3.savefig(out3, dpi=200, bbox_inches="tight")
-    print(f"  saved {out3}")
-    plt.close(fig3)
-
+    # fig3, ax3 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # ax3.plot([p[1] for p in points], [p[4] for p in points],
+                 # color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax3.set_xlabel("Avg number of GDN checkpoints")
+    # ax3.set_ylabel("Avg per-request speedup (×)")
+    # ax3.set_title(f"Pareto front: avg speedup vs checkpoint budget — {model_name}")
+    # ax3.legend(fontsize=9)
+    # ax3.grid(True, alpha=0.3)
+    # out3 = out_dir / "pareto_speedup.png"
+    # fig3.savefig(out3, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out3}")
+    # plt.close(fig3)
+ 
     # --- Panel 4: total speedup vs avg n_blocks ---
     fig4, ax4 = plt.subplots(figsize=(8, 6))
     for stype, points in sorted(families.items()):

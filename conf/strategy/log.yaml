@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 start_at: 768
 tag: "log_${start_at}"
 type: "diadic"

@@ -291,11 +291,11 @@ def run_strategy(model, dataset, strat, train_requests, test_requests,
     cache = _make_cache(cfg)
     log.info("Strategy: %s — warming cache on train split...", strat.tag)
     cache = warmup_cache(model, dataset, train_requests, vocab_size,
-                         strat, cache, progress=e2e.progress,
+                         strat, cache, progress=progress,
                          histogram_tracker=hist_tracker)
     log.info("Strategy: %s — evaluating on test split...", strat.tag)
     res = simulate(model, dataset, test_requests, vocab_size,
-                   strat, cache, progress=e2e.progress,
+                   strat, cache, progress=progress,
                    histogram_tracker=hist_tracker)
 
     log.info("  %s: prefill=%.1fs capture=%.1fs wall=%.1fs",

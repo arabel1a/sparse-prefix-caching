@@ -3,15 +3,14 @@ defaults:
   - data: narrativeqa
   - _self_
 
-run_name: paretto_plot
+run_name: clean
 overwrite: True
 log_level: WARNING
 
 data:
-  interleave: False
-  max_seq_len: 16384
-  max_convs: 1000
-  max_rows: 10000
+  interleave: True
+  max_seq_len: 128000
+  max_rows: 1000
 
 strategies:
   no_cache: {}
@@ -33,7 +32,6 @@ strategies:
   balanced_50: {_base_: balanced, n_blocks: 50}
   balanced_100: {_base_: balanced, n_blocks: 100}
   balanced_150: {_base_: balanced, n_blocks: 150}
-  balanced_200: {_base_: balanced, n_blocks: 200}
   balanced_300: {_base_: balanced, n_blocks: 300}
   # DP-optimal
   dp_5:  {_base_: hist_exp_decay, n_blocks: 5}
@@ -44,11 +42,14 @@ strategies:
   dp_50: {_base_: hist_exp_decay, n_blocks: 50}
   dp_100: {_base_: hist_exp_decay, n_blocks: 100}
   dp_150: {_base_: hist_exp_decay, n_blocks: 150}
-  dp_200: {_base_: hist_exp_decay, n_blocks: 200}
   dp_300: {_base_: hist_exp_decay, n_blocks: 300}
 
+plot_results:
+ _target_: plot_results.plot_pareto #
+
+cache_manager:
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 100
+ 
 benchmark_e2e:
   dry_run: true
-
-plot_results:
-  _target_: plot_results.plot_pareto

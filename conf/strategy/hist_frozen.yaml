@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 n_blocks: 1
 tag: "hist_frozen_${n_blocks}"
 type: "histogram_frozen"

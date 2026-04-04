@@ -8,6 +8,6 @@ format: system_prompt
 processed: data/system_prompts_${run_name}.parquet
 prompts_dir: data/system_prompts_leaks
 sharegpt_path: data/chatgpt_results_final_language_filtered.csv
-min_prompt_chars: 500
-max_prompt_chars: 100000
-queries_per_prompt: 100
+min_prompt_chars: 5000
+max_prompt_chars: 10000
+queries_per_prompt: 1

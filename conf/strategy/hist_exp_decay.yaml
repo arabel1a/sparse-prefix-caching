@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 n_blocks: 1
 
 tag: "hist_exp_decay_${n_blocks}"

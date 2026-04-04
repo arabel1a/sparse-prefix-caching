@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 tag: "hist_periodic"
 type: "histogram_periodic"
 n_blocks: 1

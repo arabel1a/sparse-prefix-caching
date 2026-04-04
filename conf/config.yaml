@@ -16,22 +16,15 @@ hydra:
   output_subdir: hydra  # saves hydra config into ${output_dir}/hydra/
 
 
+strategy_defaults:
+  save_last: False
+  laplace_alpha: 1
+  linestyle: "-"
+  linewidth: 2
+
 strategies:
   no_cache: {}   # do not delete this strat - code assumes that it is used
-  # hist_frozen_1: {_base_: hist_frozen}
-  # hist_frozen_8: {_base_: hist_frozen, n_blocks: 8}
-#   hist_1: {_base_: hist_exp_decay}
-#   hist_8: {_base_: hist_exp_decay, n_blocks: 8}
-#   last_only: {_base_: kv_only, save_last: True}
-#   kv_only: {}
-#   balanced_1: {_base_: balanced}
-#   balanced_8: {_base_: balanced, n_blocks: 8}
-#   block_r: {_base_: block, block_size: "${model.r}"}
-#   
-  # log: {}
-  # hist_exp_decay_1: {_base_: hist_exp_decay}
-  # hist_exp_decay_equal: {_base_: hist_exp_decay, n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
- 
+
 # Qwen3.5-0.8B dimensions
 model:
   name: "Qwen3.5-0.8B"

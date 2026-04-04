@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 tag: "sqrt"
 type: "sqrt"
 family_label: "Sqrt"

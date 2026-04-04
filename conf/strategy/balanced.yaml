@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 skip: 0 
 n_blocks: 1
 tag: "balanced_${n_blocks}_${skip}"

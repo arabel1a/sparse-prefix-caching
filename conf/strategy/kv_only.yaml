@@ -1,7 +1,3 @@
-defaults:
-  - base
-  - _self_
-
 tag: "kv_only"
 type: "kv_only"
 family_label: "KV only"
