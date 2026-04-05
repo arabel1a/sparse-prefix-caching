@@ -14,17 +14,20 @@ data:
 
 strategies:
   no_cache: {}
+  dp_30: {_base_: hist_exp_decay, n_blocks: 30}
   log: {}
-  sqrt: {}
-  balanced_240: {_base_: balanced, n_blocks: 240}
+  # sqrt: {}
+  # balanced_240: {_base_: balanced, n_blocks: 240}
   # dp_240: {_base_: hist_exp_decay, n_blocks: 240}
-  block_64: {_base_: block, block_size: 64}
+  # block_64: {_base_: block, block_size: 64}
   
   # Block
   block_256: {_base_: block, block_size: 256}
+  block_384: {_base_: block, block_size: 384}
   block_512: {_base_: block, block_size: 512}
   block_1024: {_base_: block, block_size: 1024}
   block_2048: {_base_: block, block_size: 2048}
+  block_3072: {_base_: block, block_size: 3072}
   block_4096: {_base_: block, block_size: 4096}
   # Balanced
   balanced_1:  {_base_: balanced, n_blocks: 1}
@@ -34,8 +37,8 @@ strategies:
   balanced_8:  {_base_: balanced, n_blocks: 8}
   balanced_12: {_base_: balanced, n_blocks: 12}
   balanced_16: {_base_: balanced, n_blocks: 16}
-  balanced_20: {_base_: balanced, n_blocks: 20}
-  balanced_25: {_base_: balanced, n_blocks: 25}
+  # balanced_20: {_base_: balanced, n_blocks: 20}
+  # balanced_25: {_base_: balanced, n_blocks: 25}
   # DP-optimal
   dp_1:  {_base_: hist_exp_decay, n_blocks: 1}
   dp_2:  {_base_: hist_exp_decay, n_blocks: 2}
@@ -51,4 +54,7 @@ plot_results:
  _target_: plot_results.plot_pareto_broken
  break_at: 25
 
+cache_manager:
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 50
 

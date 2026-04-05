@@ -1246,6 +1246,53 @@ def plot_histograms(out_dir, root_dir=None, style_map=None, **_kw):
 # ---------------------------------------------------------------------------
 # Pareto front — tokens saved vs n_blocks for each strategy family
 # ---------------------------------------------------------------------------
+
+def _pareto_reference_lines(root_dir):
+    """Compute reference lines for Pareto plots.
+
+    Returns (n_convs, perfect_total_savings, perfect_total_time) or None if data unavailable.
+    - n_convs: number of unique conversations (vertical line)
+    - perfect_total_savings: total speedup if all prefix matches are fully cached
+    - perfect_total_time: total time if all prefix matches are fully cached
+    """
+    # n_convs from overlap_lcp.json
+    lcp_path = root_dir / "prepare_data" / "overlap_lcp.json"
+    n_convs = None
+    if lcp_path.exists():
+        lcp_data = json.loads(lcp_path.read_text())
+        n_convs = lcp_data.get("n_conversations")
+
+    # Perfect model from any strategy's JSONL (they all see the same prefix_match)
+    data_dir = root_dir / "benchmark_e2e"
+    perfect_total_savings = None
+    perfect_total_time = None
+    for jsonl_path in sorted(data_dir.glob("e2e_*.jsonl")):
+        tag = jsonl_path.stem.removeprefix("e2e_")
+        if tag == "no_cache":
+            continue
+        entries = [json.loads(l) for l in jsonl_path.read_text().splitlines() if l.strip()]
+        if not entries or "prefix_match" not in entries[0]:
+            continue
+        total_tokens = sum(e["seq_len"] for e in entries)
+        total_recompute = sum(e["seq_len"] - e["prefix_match"] for e in entries)
+        perfect_total_savings = total_tokens / total_recompute if total_recompute > 0 else float("inf")
+        perfect_total_time = sum((e["seq_len"] - e["prefix_match"]) * 0.05 for e in entries)
+        break  # all strategies see the same prefix_match values
+
+    return n_convs, perfect_total_savings, perfect_total_time
+
+
+def _add_reference_lines(ax, n_convs, perfect_value, y_metric):
+    """Add n_convs vertical line and perfect-model horizontal line to an axis."""
+    if n_convs is not None:
+        ax.axvline(n_convs, color="red", linestyle=":", linewidth=1.5, alpha=0.7,
+                   label=f"n_convs = {n_convs}", zorder=2)
+    if perfect_value is not None:
+        ax.axhline(perfect_value, color="blue", linestyle=":", linewidth=1.5, alpha=0.7,
+                   label=f"perfect = {perfect_value:.2f}" if y_metric == "savings" else f"perfect = {perfect_value:.1f}s",
+                   zorder=2)
+
+
 def _load_jsonl_stats(data_dir, tag):
     """Load per-request JSONL and return (avg_gdn_bytes, avg_n_blocks, avg_speedup, total_speedup, total_time_s)."""
     jsonl_path = data_dir / f"e2e_{tag}.jsonl"
@@ -1267,7 +1314,7 @@ def _load_jsonl_stats(data_dir, tag):
     return avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s
 
 
-def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_kw):
+def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, reference_lines=False, **_kw):
     """Pareto front with a broken x-axis: [0, break_at] then [break_at+gap, max].
 
     ``break_at`` is the n_blocks threshold separating the two panels.
@@ -1312,14 +1359,19 @@ def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_k
 
     if not all_right_x:
         # Nothing beyond break_at — fall back to normal pareto
-        plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
+        plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, reference_lines=reference_lines, **_kw)
         return
 
     right_lo = min(all_right_x) * 0.9
     right_hi = max(all_right_x) * 1.1
 
+    if reference_lines:
+        n_convs, perfect_total_savings, perfect_total_time = _pareto_reference_lines(root_dir)
+    else:
+        n_convs = perfect_total_savings = perfect_total_time = None
+
     # --- Helper to draw one metric on a broken-axis figure ---
-    def _draw_broken(ylabel, title_suffix, y_idx, out_name):
+    def _draw_broken(ylabel, title_suffix, y_idx, out_name, y_metric="savings"):
         fig, (ax_l, ax_r) = plt.subplots(
             1, 2, sharey=True, figsize=(10, 6),
             gridspec_kw={"width_ratios": [3, 1], "wspace": 0.08},
@@ -1388,6 +1440,11 @@ def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_k
         ax_r.set_xlabel("")
         fig.suptitle(f"Pareto front: {title_suffix}", fontsize=13)
 
+        # Reference lines
+        perfect_val = perfect_total_savings if y_metric == "savings" else perfect_total_time
+        _add_reference_lines(ax_l, n_convs, perfect_val, y_metric)
+        _add_reference_lines(ax_r, n_convs, perfect_val, y_metric)
+
         # Legend from left axis only (it has all families)
         ax_l.legend(fontsize=9)
 
@@ -1400,9 +1457,9 @@ def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_k
         plt.close(fig)
 
     # Panel: total savings
-    _draw_broken("Total savings (\u00d7)", "total savings vs checkpoint budget", 5, "pareto_broken_total_savings.png")
+    _draw_broken("Total savings (\u00d7)", "total savings vs checkpoint budget", 5, "pareto_broken_total_savings.png", y_metric="savings")
     # Panel: total time
-    _draw_broken("Total processing time (s)", f"total time vs checkpoint budget \u2014 {model_name}", 6, "pareto_broken_total_time.png")
+    _draw_broken("Total processing time (s)", f"total time vs checkpoint budget \u2014 {model_name}", 6, "pareto_broken_total_time.png", y_metric="time")
 
     # Print table (same as plot_pareto)
     print(f"\n  {'Strategy':<30} {'Avg n_blk':>9} {'Saved%':>8} {'Avg spd':>8} {'Tot spd':>8} {'Tot time':>10} {'Avg GDN (MB)':>12}")
@@ -1414,7 +1471,7 @@ def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, **_k
             print(f"  {label:<30} {nb:>9.1f} {saved:>7.1f}% {avg_spd:>7.2f}\u00d7 {tot_spd:>7.2f}\u00d7 {tot_time:>9.1f}s {gdn/1024/1024:>11.2f}")
 
 
-def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
+def plot_pareto(out_dir, root_dir=None, style_map=None, reference_lines=False, **_kw):
     """Plot Pareto front: tokens_saved (%) vs avg GDN cache size."""
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
@@ -1446,6 +1503,11 @@ def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
     if not families:
         print("  no budgeted strategies found, skipping pareto plot")
         return
+
+    if reference_lines:
+        n_convs, perfect_total_savings, perfect_total_time = _pareto_reference_lines(root_dir)
+    else:
+        n_convs = perfect_total_savings = perfect_total_time = None
 
     # --- Panel 1: tokens_saved% vs avg n_blocks ---
     # fig1, ax1 = plt.subplots(figsize=(8, 6))
@@ -1521,6 +1583,7 @@ def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
     ax4.set_xlabel("Avg number of GDN checkpoints")
     ax4.set_ylabel("Total savings (×)")
     ax4.set_title(f"Pareto front: total savings vs checkpoint budget")
+    _add_reference_lines(ax4, n_convs, perfect_total_savings, "savings")
     ax4.legend(fontsize=9)
     ax4.grid(True, alpha=0.3)
     out4 = out_dir / "pareto_total_savings.png"
@@ -1541,6 +1604,7 @@ def plot_pareto(out_dir, root_dir=None, style_map=None, **_kw):
     ax5.set_xlabel("Avg number of GDN checkpoints")
     ax5.set_ylabel("Total processing time (s)")
     ax5.set_title(f"Pareto front: total time vs checkpoint budget — {model_name}")
+    _add_reference_lines(ax5, n_convs, perfect_total_time, "time")
     ax5.legend(fontsize=9)
     ax5.grid(True, alpha=0.3)
     out5 = out_dir / "pareto_total_time.png"
@@ -1574,7 +1638,7 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_gdn_gap(out_dir, root_dir=root_dir, style_map=style_map)
     plot_cache_breakdown(out_dir, root_dir=root_dir, style_map=style_map)
     plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
-    plot_pareto(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
 
 # ---------------------------------------------------------------------------
 # Hydra entry point — dispatches via plot._target_

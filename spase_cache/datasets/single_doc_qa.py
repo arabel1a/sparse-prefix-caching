@@ -229,11 +229,12 @@ class MuLDDataset(SingleDocQADataset):
                     n_read += 1
 
         rows, gid = [], 0
-        for doc_hash, grp in doc_groups.items():
-            if len(grp["qas"]) < cfg.min_questions:
-                continue
+        for j, (doc_hash, grp) in enumerate(doc_groups.items()):
+            if j >= cfg.max_convs: break
+            if len(grp["qas"]) < cfg.min_questions: continue
             doc = grp["doc"]
             for i, (question, answer) in enumerate(grp["qas"]):
+                if i > cfg.max_questions: break
                 text = f"{doc} Question: {question} Answer: {answer}"
                 rows.append({"group_id": gid, "idx": i, "text": text})
             gid += 1

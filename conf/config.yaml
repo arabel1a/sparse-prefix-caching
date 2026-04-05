@@ -78,3 +78,4 @@ prepare_data:
 
 plot_results:
   _target_: plot_results.plot_all  # or plot_results.plot_single, plot_results.plot_tradeoff, plot_results.plot_e2e, plot_results.plot_overlap
+  reference_lines: False

@@ -8,4 +8,6 @@ format: revision
 processed: data/narrativeqa_${run_name}.parquet
 subset: NarrativeQA
 min_questions: 2
+max_questions: 100
+max_convs: 100 
 split: train
