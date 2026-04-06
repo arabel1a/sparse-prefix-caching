@@ -43,5 +43,5 @@ strategies:
   dp_30: {_base_: hist_exp_decay, n_blocks: 30}
 
 plot_results:
- _target_: plot_results.plot_pareto_broken
+ _target_: plot_results.plot_all
  break_at: 35

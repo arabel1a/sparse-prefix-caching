@@ -51,7 +51,7 @@ strategies:
   dp_25: {_base_: hist_exp_decay, n_blocks: 25}
 
 plot_results:
- _target_: plot_results.plot_pareto_broken
+ _target_: plot_results.plot_all
  break_at: 25
 
 cache_manager:

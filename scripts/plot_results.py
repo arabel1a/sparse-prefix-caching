@@ -426,7 +426,7 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
     from fitter import Fitter
 
     distributions = ["gamma", "lognorm", "beta", "expon", "weibull_min", "norm"]
-    f = Fitter(lcp_pos, distributions=distributions)
+    f = Fitter(lcp_pos, distributions=distributions, bins=20)
     f.fit()
 
     plt.figure(figsize=(10, 6))
@@ -1244,6 +1244,91 @@ def plot_histograms(out_dir, root_dir=None, style_map=None, **_kw):
 
 
 # ---------------------------------------------------------------------------
+# Scatter: tokens to process vs wallclock time
+# ---------------------------------------------------------------------------
+
+def plot_tokens_vs_time(out_dir, root_dir=None, style_map=None, **_kw):
+    """Scatter plot: tokens to process (seq_len - tokens_saved) vs wallclock time."""
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping tokens_vs_time plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    sidx = _build_style_index(summary)
+
+    SKIP_TYPES = {"no_cache"}
+
+    # Precompute max prefix_match across all strategies for sizing
+    max_match_global = 0
+    for tag in summary["strategies"]:
+        jsonl_path = data_dir / f"e2e_{tag}.jsonl"
+        if not jsonl_path.exists():
+            continue
+        for line in jsonl_path.read_text().splitlines():
+            if line.strip():
+                e = json.loads(line)
+                if e["hit"] and e["prefix_match"] > max_match_global:
+                    max_match_global = e["prefix_match"]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    seen_families = set()
+    for tag, _stats in summary["strategies"].items():
+        cfg = sidx[tag]
+        if cfg["type"] in SKIP_TYPES:
+            continue
+        jsonl_path = data_dir / f"e2e_{tag}.jsonl"
+        if not jsonl_path.exists():
+            continue
+        entries = [json.loads(l) for l in jsonl_path.read_text().splitlines() if l.strip()]
+        if not entries:
+            continue
+
+        _, color, marker, _ls, _lw = _spec(tag, style_map)
+        fam = _family_label(tag, style_map)
+
+        hits = [e for e in entries if e["hit"]]
+        misses = [e for e in entries if not e["hit"]]
+
+        # Misses: small grey dots
+        if misses:
+            miss_label = "miss" if "miss" not in seen_families else None
+            seen_families.add("miss")
+            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in misses],
+                       [e["time_s"] for e in misses],
+                       color="grey", marker=".", s=15, alpha=0.4,
+                       label=miss_label, zorder=2)
+
+        # Hits: colored by family, size proportional to match_len
+        if hits:
+            label = fam if fam not in seen_families else None
+            seen_families.add(fam)
+            match_lens = [e["prefix_match"] for e in hits]
+            max_match = max(max_match_global, 1)
+            sizes = [10 + 120 * (m / max_match) for m in match_lens]
+            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in hits],
+                       [e["time_s"] for e in hits],
+                       color=color, marker=marker, s=sizes, alpha=0.6,
+                       label=label, zorder=3)
+
+    ax.set_xlabel("Tokens to process (seq_len − tokens_saved)")
+    ax.set_ylabel("Wall-clock time (s)")
+    ax.set_title(f"Tokens to process vs wall-clock time — {model_name}")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    out_path = out_dir / "tokens_vs_time.png"
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    print(f"  saved {out_path}")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Pareto front — tokens saved vs n_blocks for each strategy family
 # ---------------------------------------------------------------------------
 
@@ -1638,6 +1723,7 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_gdn_gap(out_dir, root_dir=root_dir, style_map=style_map)
     plot_cache_breakdown(out_dir, root_dir=root_dir, style_map=style_map)
     plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_tokens_vs_time(out_dir, root_dir=root_dir, style_map=style_map)
     plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
 
 # ---------------------------------------------------------------------------
