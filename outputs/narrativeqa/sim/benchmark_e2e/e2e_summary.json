@@ -1,0 +1,713 @@
+{
+  "model_name": "Qwen3.5-0.8B",
+  "dry_run": true,
+  "n_train_requests": 3566,
+  "n_test_requests": 2378,
+  "total_tokens": 153301796,
+  "train_frac": 0.6,
+  "cache_manager_config": {
+    "_target_": "spase_cache.utils.FixedSizeCache",
+    "max_cached_sequences": 100
+  },
+  "strategies": {
+    "no_cache": {
+      "total_time": 7665089.800000001,
+      "total_capture_time": 0.0,
+      "wall_time": 7665089.800000001,
+      "hits": 0,
+      "tokens_saved": 0,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 0,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 0.0,
+        "gdn_used_gb": 0.0
+      }
+    },
+    "log": {
+      "total_time": 4043201.8000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 4043201.8000000003,
+      "hits": 1682,
+      "tokens_saved": 72437760,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.915935232
+      }
+    },
+    "sqrt": {
+      "total_time": 2292689.8000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 2292689.8000000003,
+      "hits": 1682,
+      "tokens_saved": 107448000,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 32.711282688
+      }
+    },
+    "block_2048": {
+      "total_time": 2368347.4,
+      "total_capture_time": 0.0,
+      "wall_time": 2368347.4,
+      "hits": 1682,
+      "tokens_saved": 105934848,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 3.327307776
+      }
+    },
+    "block_4096": {
+      "total_time": 2429582.6,
+      "total_capture_time": 0.0,
+      "wall_time": 2429582.6,
+      "hits": 1682,
+      "tokens_saved": 104710144,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 1.632264192
+      }
+    },
+    "block_8192": {
+      "total_time": 2598747.4,
+      "total_capture_time": 0.0,
+      "wall_time": 2598747.4,
+      "hits": 1682,
+      "tokens_saved": 101326848,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.742084608
+      }
+    },
+    "block_16384": {
+      "total_time": 3013672.2,
+      "total_capture_time": 0.0,
+      "wall_time": 3013672.2,
+      "hits": 1682,
+      "tokens_saved": 93028352,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.331603968
+      }
+    },
+    "balanced_1": {
+      "total_time": 4974392.2,
+      "total_capture_time": 0.0,
+      "wall_time": 4974392.2,
+      "hits": 1682,
+      "tokens_saved": 53813952,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.1609728
+      }
+    },
+    "balanced_2": {
+      "total_time": 4077109.0,
+      "total_capture_time": 0.0,
+      "wall_time": 4077109.0,
+      "hits": 1682,
+      "tokens_saved": 71759616,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.3219456
+      }
+    },
+    "balanced_3": {
+      "total_time": 3628565.0,
+      "total_capture_time": 0.0,
+      "wall_time": 3628565.0,
+      "hits": 1682,
+      "tokens_saved": 80730496,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.4829184
+      }
+    },
+    "balanced_5": {
+      "total_time": 3179960.2,
+      "total_capture_time": 0.0,
+      "wall_time": 3179960.2,
+      "hits": 1682,
+      "tokens_saved": 89702592,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.804864
+      }
+    },
+    "balanced_8": {
+      "total_time": 2880430.6,
+      "total_capture_time": 0.0,
+      "wall_time": 2880430.6,
+      "hits": 1682,
+      "tokens_saved": 95693184,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 1.2877824
+      }
+    },
+    "balanced_12": {
+      "total_time": 2696536.2,
+      "total_capture_time": 0.0,
+      "wall_time": 2696536.2,
+      "hits": 1682,
+      "tokens_saved": 99371072,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 1.9316736
+      }
+    },
+    "balanced_16": {
+      "total_time": 2598785.8000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 2598785.8000000003,
+      "hits": 1682,
+      "tokens_saved": 101326080,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 2.5755648
+      }
+    },
+    "balanced_30": {
+      "total_time": 2456821.0,
+      "total_capture_time": 0.0,
+      "wall_time": 2456821.0,
+      "hits": 1682,
+      "tokens_saved": 104165376,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 4.829184
+      }
+    },
+    "dp_1": {
+      "total_time": 4737336.2,
+      "total_capture_time": 0.0,
+      "wall_time": 4737336.2,
+      "hits": 1682,
+      "tokens_saved": 58555072,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.094973952
+      }
+    },
+    "dp_2": {
+      "total_time": 3962142.6,
+      "total_capture_time": 0.0,
+      "wall_time": 3962142.6,
+      "hits": 1682,
+      "tokens_saved": 74058944,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.149704704
+      }
+    },
+    "dp_3": {
+      "total_time": 3391809.8000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 3391809.8000000003,
+      "hits": 1682,
+      "tokens_saved": 85465600,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.226971648
+      }
+    },
+    "dp_5": {
+      "total_time": 2958248.2,
+      "total_capture_time": 0.0,
+      "wall_time": 2958248.2,
+      "hits": 1682,
+      "tokens_saved": 94136832,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.326774784
+      }
+    },
+    "dp_8": {
+      "total_time": 2658443.4,
+      "total_capture_time": 0.0,
+      "wall_time": 2658443.4,
+      "hits": 1682,
+      "tokens_saved": 100132928,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.548917248
+      }
+    },
+    "dp_12": {
+      "total_time": 2523877.0,
+      "total_capture_time": 0.0,
+      "wall_time": 2523877.0,
+      "hits": 1682,
+      "tokens_saved": 102824256,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 0.840278016
+      }
+    },
+    "dp_16": {
+      "total_time": 2454280.2,
+      "total_capture_time": 0.0,
+      "wall_time": 2454280.2,
+      "hits": 1682,
+      "tokens_saved": 104216192,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 1.067249664
+      }
+    },
+    "dp_30": {
+      "total_time": 2356593.8000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 2356593.8000000003,
+      "hits": 1682,
+      "tokens_saved": 106169920,
+      "tokens_total": 153301796,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 100,
+        "max_cached_sequences": 100,
+        "kv_used_gb": 8.902971392,
+        "gdn_used_gb": 1.773920256
+      }
+    }
+  },
+  "strategy_styles": [
+    {
+      "tag": "no_cache",
+      "type": "no_cache",
+      "family_label": "No caching",
+      "label": "No caching",
+      "color": "black",
+      "marker": "o",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "start_at": 768,
+      "tag": "log",
+      "type": "diadic",
+      "family_label": "Logarithmic",
+      "label": "Logarithmic (start=768)",
+      "color": "tab:orange",
+      "marker": "v",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "tag": "sqrt",
+      "type": "sqrt",
+      "family_label": "Sqrt",
+      "label": "Sqrt",
+      "color": "tab:red",
+      "marker": "s",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 2048,
+      "tag": "block_2048",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=2048)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 4096,
+      "tag": "block_4096",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=4096)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 8192,
+      "tag": "block_8192",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=8192)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 16384,
+      "tag": "block_16384",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=16384)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 1,
+      "tag": "balanced_1",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (1 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 2,
+      "tag": "balanced_2",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (2 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 3,
+      "tag": "balanced_3",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (3 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 5,
+      "tag": "balanced_5",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (5 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 8,
+      "tag": "balanced_8",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (8 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 12,
+      "tag": "balanced_12",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (12 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 16,
+      "tag": "balanced_16",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (16 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 30,
+      "tag": "balanced_30",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (30 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "n_blocks": 1,
+      "tag": "dp_1",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (1 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 2,
+      "tag": "dp_2",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (2 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 3,
+      "tag": "dp_3",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (3 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 5,
+      "tag": "dp_5",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (5 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 8,
+      "tag": "dp_8",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (8 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 12,
+      "tag": "dp_12",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (12 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 16,
+      "tag": "dp_16",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (16 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 30,
+      "tag": "dp_30",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (30 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    }
+  ]
+}

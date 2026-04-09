@@ -1,0 +1,832 @@
+{
+  "model_name": "Qwen3.5-0.8B",
+  "dry_run": true,
+  "n_train_requests": 1513,
+  "n_test_requests": 1010,
+  "total_tokens": 6092817,
+  "train_frac": 0.6,
+  "cache_manager_config": {
+    "_target_": "spase_cache.utils.FixedSizeCache",
+    "max_cached_sequences": 20
+  },
+  "strategies": {
+    "no_cache": {
+      "total_time": 304640.85000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 304640.85000000003,
+      "hits": 0,
+      "tokens_saved": 0,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 0,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.0,
+        "gdn_used_gb": 0.0
+      }
+    },
+    "log": {
+      "total_time": 265114.45,
+      "total_capture_time": 0.0,
+      "wall_time": 265114.45,
+      "hits": 216,
+      "tokens_saved": 790528,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.0804864
+      }
+    },
+    "sqrt": {
+      "total_time": 240781.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 240781.65000000002,
+      "hits": 216,
+      "tokens_saved": 1277184,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 2.14093824
+      }
+    },
+    "block_64": {
+      "total_time": 240637.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 240637.65000000002,
+      "hits": 216,
+      "tokens_saved": 1280064,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 2.646392832
+      }
+    },
+    "dp_300": {
+      "total_time": 240676.05000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 240676.05000000002,
+      "hits": 216,
+      "tokens_saved": 1279296,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 1.170272256
+      }
+    },
+    "balanced_300": {
+      "total_time": 241776.85,
+      "total_capture_time": 0.0,
+      "wall_time": 241776.85,
+      "hits": 216,
+      "tokens_saved": 1257280,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 2.562686976
+      }
+    },
+    "block_192": {
+      "total_time": 241338.45,
+      "total_capture_time": 0.0,
+      "wall_time": 241338.45,
+      "hits": 216,
+      "tokens_saved": 1266048,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.870862848
+      }
+    },
+    "block_256": {
+      "total_time": 241562.45,
+      "total_capture_time": 0.0,
+      "wall_time": 241562.45,
+      "hits": 216,
+      "tokens_saved": 1261568,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.650330112
+      }
+    },
+    "block_512": {
+      "total_time": 242765.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 242765.65000000002,
+      "hits": 216,
+      "tokens_saved": 1237504,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.317116416
+      }
+    },
+    "block_1024": {
+      "total_time": 246221.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 246221.65000000002,
+      "hits": 216,
+      "tokens_saved": 1168384,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.14487552
+      }
+    },
+    "block_2048": {
+      "total_time": 251597.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 251597.65000000002,
+      "hits": 216,
+      "tokens_saved": 1060864,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.06438912
+      }
+    },
+    "block_4096": {
+      "total_time": 270439.25,
+      "total_capture_time": 0.0,
+      "wall_time": 270439.25,
+      "hits": 216,
+      "tokens_saved": 684032,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.01609728
+      }
+    },
+    "balanced_1": {
+      "total_time": 272388.05,
+      "total_capture_time": 0.0,
+      "wall_time": 272388.05,
+      "hits": 216,
+      "tokens_saved": 645056,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.03219456
+      }
+    },
+    "balanced_2": {
+      "total_time": 261482.45,
+      "total_capture_time": 0.0,
+      "wall_time": 261482.45,
+      "hits": 216,
+      "tokens_saved": 863168,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.06438912
+      }
+    },
+    "balanced_3": {
+      "total_time": 256090.45,
+      "total_capture_time": 0.0,
+      "wall_time": 256090.45,
+      "hits": 216,
+      "tokens_saved": 971008,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.09658368
+      }
+    },
+    "balanced_5": {
+      "total_time": 250637.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 250637.65000000002,
+      "hits": 216,
+      "tokens_saved": 1080064,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.1609728
+      }
+    },
+    "balanced_12": {
+      "total_time": 244820.05000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 244820.05000000002,
+      "hits": 216,
+      "tokens_saved": 1196416,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.38633472
+      }
+    },
+    "balanced_20": {
+      "total_time": 242909.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 242909.65000000002,
+      "hits": 216,
+      "tokens_saved": 1234624,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.6438912
+      }
+    },
+    "balanced_30": {
+      "total_time": 242000.85,
+      "total_capture_time": 0.0,
+      "wall_time": 242000.85,
+      "hits": 216,
+      "tokens_saved": 1252800,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.9658368
+      }
+    },
+    "dp_1": {
+      "total_time": 263648.85000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 263648.85000000003,
+      "hits": 216,
+      "tokens_saved": 819840,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.01609728
+      }
+    },
+    "dp_2": {
+      "total_time": 254464.85,
+      "total_capture_time": 0.0,
+      "wall_time": 254464.85,
+      "hits": 216,
+      "tokens_saved": 1003520,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.04829184
+      }
+    },
+    "dp_3": {
+      "total_time": 249943.25000000003,
+      "total_capture_time": 0.0,
+      "wall_time": 249943.25000000003,
+      "hits": 216,
+      "tokens_saved": 1093952,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.06438912
+      }
+    },
+    "dp_5": {
+      "total_time": 245946.45,
+      "total_capture_time": 0.0,
+      "wall_time": 245946.45,
+      "hits": 216,
+      "tokens_saved": 1173888,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.091754496
+      }
+    },
+    "dp_8": {
+      "total_time": 243898.45,
+      "total_capture_time": 0.0,
+      "wall_time": 243898.45,
+      "hits": 216,
+      "tokens_saved": 1214848,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.146485248
+      }
+    },
+    "dp_12": {
+      "total_time": 242717.65000000002,
+      "total_capture_time": 0.0,
+      "wall_time": 242717.65000000002,
+      "hits": 216,
+      "tokens_saved": 1238464,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.210874368
+      }
+    },
+    "dp_25": {
+      "total_time": 241959.25,
+      "total_capture_time": 0.0,
+      "wall_time": 241959.25,
+      "hits": 216,
+      "tokens_saved": 1253632,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.349310976
+      }
+    },
+    "dp_30": {
+      "total_time": 241399.25,
+      "total_capture_time": 0.0,
+      "wall_time": 241399.25,
+      "hits": 216,
+      "tokens_saved": 1264832,
+      "tokens_total": 6092817,
+      "cache_stats": {
+        "type": "FixedSizeCache",
+        "n_entries": 20,
+        "max_cached_sequences": 20,
+        "kv_used_gb": 0.21660672,
+        "gdn_used_gb": 0.495796224
+      }
+    }
+  },
+  "strategy_styles": [
+    {
+      "tag": "no_cache",
+      "type": "no_cache",
+      "family_label": "No caching",
+      "label": "No caching",
+      "color": "black",
+      "marker": "o",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "start_at": 768,
+      "tag": "log",
+      "type": "diadic",
+      "family_label": "Logarithmic",
+      "label": "Logarithmic (start=768)",
+      "color": "tab:orange",
+      "marker": "v",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "tag": "sqrt",
+      "type": "sqrt",
+      "family_label": "Sqrt",
+      "label": "Sqrt",
+      "color": "tab:red",
+      "marker": "s",
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "linewidth": 2,
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 64,
+      "tag": "block_64",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=64)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "n_blocks": 300,
+      "tag": "dp_300",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (300 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "skip": 0,
+      "n_blocks": 300,
+      "tag": "balanced_300",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (300 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 192,
+      "tag": "block_192",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=192)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 256,
+      "tag": "block_256",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=256)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 512,
+      "tag": "block_512",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=512)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 1024,
+      "tag": "block_1024",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=1024)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 2048,
+      "tag": "block_2048",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=2048)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "block_size": 4096,
+      "tag": "block_4096",
+      "type": "balanced_fix_blocksize",
+      "family_label": "Block",
+      "label": "Block (B=4096)",
+      "color": "tab:blue",
+      "marker": "^",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 1,
+      "tag": "balanced_1",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (1 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 2,
+      "tag": "balanced_2",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (2 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 3,
+      "tag": "balanced_3",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (3 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 5,
+      "tag": "balanced_5",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (5 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 12,
+      "tag": "balanced_12",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (12 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 20,
+      "tag": "balanced_20",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (20 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "skip": 0,
+      "n_blocks": 30,
+      "tag": "balanced_30",
+      "type": "balanced_fix_nblocks",
+      "family_label": "Balanced",
+      "label": "Balanced (30 blocks, skip 0)",
+      "color": "tab:cyan",
+      "marker": "D",
+      "linewidth": 2,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linestyle": "-",
+      "adaptive_backtrack": false
+    },
+    {
+      "n_blocks": 1,
+      "tag": "dp_1",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (1 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 2,
+      "tag": "dp_2",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (2 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 3,
+      "tag": "dp_3",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (3 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 5,
+      "tag": "dp_5",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (5 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 8,
+      "tag": "dp_8",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (8 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 12,
+      "tag": "dp_12",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (12 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 20,
+      "tag": "dp_25",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (20 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    },
+    {
+      "n_blocks": 30,
+      "tag": "dp_30",
+      "type": "histogram_exp_decay",
+      "bin_size": 64,
+      "gamma": 0.99,
+      "replan_interval": 10,
+      "family_label": "DP-optimal",
+      "label": "DP-optimal (30 blocks, \u03b3=0.99)",
+      "color": "tab:olive",
+      "marker": "*",
+      "linestyle": "-",
+      "adaptive_backtrack": false,
+      "save_last": false,
+      "laplace_alpha": 0,
+      "linewidth": 2
+    }
+  ]
+}
