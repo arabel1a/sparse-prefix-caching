@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+
+_target_: spase_cache.datasets.single_doc_qa.MuLDDataset
+name: hotpotqa
+format: revision
+processed: data/hotpotqa_${run_name}.parquet
+subset: HotpotQA
+min_questions: 2
+split: train

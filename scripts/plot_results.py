@@ -22,28 +22,37 @@ log = logging.getLogger(__name__)
 
 
 def _build_style_map(strategies_cfg):
-    """Build {tag: (label, color, marker, ls, lw)} from hydra strategies config."""
+    """Build {tag: (label, color, marker, ls, lw, family_label)} from hydra strategies config."""
     out = {}
     for s in strategies_cfg:
         out[s.tag] = (
             s.label,
             s.color,
             s.marker,
-            s.get("linestyle", "-"),
-            s.get("linewidth", 2),
+            s.linestyle,
+            s.linewidth,
+            s.family_label,
         )
     return out
 
 
 def _spec(key, style_map):
+    """Return (label, color, marker, ls, lw) for a strategy tag."""
     if key in style_map:
-        return style_map[key]
+        return style_map[key][:5]
     return key, 'gray', 'x', '-', 1
+
+
+def _family_label(key, style_map):
+    """Return family_label for a strategy tag (for legend grouping)."""
+    if key in style_map and len(style_map[key]) > 5:
+        return style_map[key][5]
+    return _spec(key, style_map)[0]
 
 
 def _build_style_index(summary):
     """Build {tag: style_dict} from strategy_styles in summary JSON."""
-    return {s["tag"]: s for s in summary.get("strategy_styles", [])}
+    return {s["tag"]: s for s in summary["strategy_styles"]}
 
 
 def _sort_strategies_by_budget(strat_keys, style_index=None):
@@ -57,8 +66,8 @@ def _sort_strategies_by_budget(strat_keys, style_index=None):
     }
 
     def _sort_key(s):
-        cfg = (style_index or {}).get(s, {})
-        stype = cfg.get("type", s)
+        cfg = style_index[s]
+        stype = cfg["type"]
         family = FAMILY_ORDER.get(stype, 5)
         n_blocks = cfg.get("n_blocks", 0)
         block_size = cfg.get("block_size", 0)
@@ -88,18 +97,16 @@ def _group_strategies_by_budget(strat_keys, style_index=None):
     others = []
 
     for s in strat_keys:
-        cfg = (style_index or {}).get(s, {})
-        stype = cfg.get("type", "")
+        cfg = style_index[s]
+        stype = cfg["type"]
         if stype in BUDGETED_TYPES:
-            n_blocks = cfg.get("n_blocks", 0)
-            budgeted.setdefault(n_blocks, []).append(s)
+            budgeted.setdefault(cfg["n_blocks"], []).append(s)
         else:
             others.append(s)
 
     groups = []
     for budget, strats in sorted(budgeted.items()):
-        strats.sort(key=lambda s: FAMILY_ORDER.get(
-            (style_index or {}).get(s, {}).get("type", ""), 9))
+        strats.sort(key=lambda s: FAMILY_ORDER[style_index[s]["type"]] if style_index[s]["type"] in FAMILY_ORDER else 9)
         groups.append((f"{budget} blocks", strats))
 
     for s in others:
@@ -149,17 +156,16 @@ def plot_single(out_dir, root_dir=None, style_map=None, **_kw):
     flop_per_tok = flop_ga_linear + flop_gdn_recompute
 
     # Theoretical FLOPs per strategy — keyed by tag
-    styles = data.get("strategy_styles", [])
-    styles_by_tag = {s["tag"]: s for s in styles}
+    styles_by_tag = {s["tag"]: s for s in data["strategy_styles"]}
     theo = {}
     for tag in strategies:
-        s_cfg = styles_by_tag.get(tag, {})
-        stype = s_cfg.get("type", tag)  # fallback for old data without type
+        s_cfg = styles_by_tag[tag]
+        stype = s_cfg["type"]
         if stype == "no_cache":
             theo[tag] = N_arr * flop_per_tok + N_arr**2 * flop_ga_quad_per_tok
         elif stype == "kv_only":
             theo[tag] = N_arr * flop_gdn_recompute
-        elif s_cfg.get("block_size"):
+        elif stype == "balanced_fix_blocksize":
             B = s_cfg["block_size"]
             n_tail = N_arr % B
             theo[tag] = n_tail * flop_per_tok + n_tail * N_arr * flop_ga_quad_per_tok
@@ -187,13 +193,13 @@ def plot_single(out_dir, root_dir=None, style_map=None, **_kw):
 
     theo_cache = {}
     for tag in strategies:
-        s_cfg = styles_by_tag.get(tag, {})
-        stype = s_cfg.get("type", tag)
+        s_cfg = styles_by_tag[tag]
+        stype = s_cfg["type"]
         if stype == "no_cache":
             theo_cache[tag] = np.zeros_like(N_arr)
         elif stype == "kv_only":
             theo_cache[tag] = N_arr * attn_kv_per_token
-        elif s_cfg.get("block_size"):
+        elif stype == "balanced_fix_blocksize":
             B = s_cfg["block_size"]
             n_ckpts = np.floor(N_arr / B)
             theo_cache[tag] = N_arr * attn_kv_per_token + n_ckpts * per_ckpt
@@ -294,7 +300,7 @@ def plot_e2e(out_dir, root_dir=None, style_map=None, **_kw):
         report.remove("no_cache")
         report = ["no_cache"] + report
     times_ms = {s: np.array([e["time_s"] for e in per_request[s]]) * 1000 for s in report}
-    baseline_ms = times_ms.get("no_cache")
+    baseline_ms = times_ms["no_cache"]
 
     # --- Boxplots ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -380,19 +386,19 @@ def plot_e2e(out_dir, root_dir=None, style_map=None, **_kw):
         t_base = summary["strategies"]["no_cache"]["total_time"]
     else:
         t_base = None
-    n_req = summary.get("n_test_requests", summary.get("n_requests", 1))
+    n_req = summary["n_test_requests"]
 
     print(f"\n  {'Strategy':<30} {'Time (s)':>10} {'Speedup':>8} {'Hit rate':>10} {'GDN saved':>10}")
     print(f"  {'-'*70}")
     for strat in report:
-        s = summary["strategies"].get(strat, {})
+        s = summary["strategies"][strat]
         label = _spec(strat, style_map)[0]
-        t = s.get("total_time", 0)
+        t = s["total_time"]
         speedup = t_base / t if t_base and t > 0 else 0
         has_cache = strat != "no_cache"
-        hit_rate = s.get("hits", 0) / n_req * 100 if has_cache else 0
-        tok_total = s.get("tokens_total", 1)
-        tok_saved = s.get("tokens_saved", 0) / tok_total * 100 if has_cache and tok_total > 0 else 0
+        hit_rate = s["hits"] / n_req * 100 if has_cache else 0
+        tok_total = s["tokens_total"]
+        tok_saved = s["tokens_saved"] / tok_total * 100 if has_cache and tok_total > 0 else 0
         print(f"  {label:<30} {t:>10.1f} {speedup:>7.2f}x {hit_rate:>9.1f}% {tok_saved:>9.1f}%")
 
 
@@ -409,7 +415,7 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
 
     data = json.loads(path.read_text())
     lcp = np.array(data["lcp_lengths"])
-    n_total = data.get("n_requests", data.get("n_test_requests", len(lcp)))
+    n_total = data["n_requests"]
     n_conversations = data["n_conversations"]
     lcp_pos = lcp[lcp > 0]
 
@@ -420,7 +426,7 @@ def plot_overlap(out_dir, root_dir=None, **_kw):
     from fitter import Fitter
 
     distributions = ["gamma", "lognorm", "beta", "expon", "weibull_min", "norm"]
-    f = Fitter(lcp_pos, distributions=distributions)
+    f = Fitter(lcp_pos, distributions=distributions, bins=20)
     f.fit()
 
     plt.figure(figsize=(10, 6))
@@ -670,18 +676,15 @@ def plot_trie_diagnostics(out_dir, root_dir=None, style_map=None, **_kw):
             ax.set_title("Prefix sharing heatmap")
         else:
             # Cluster by similarity
-            try:
-                from scipy.cluster.hierarchy import linkage, leaves_list
-                from scipy.spatial.distance import squareform
-                max_lcp = lcp_matrix.max()
-                dist = max_lcp - lcp_matrix
-                np.fill_diagonal(dist, 0)
-                condensed = squareform(dist, checks=False)
-                Z = linkage(condensed, method="average")
-                order = leaves_list(Z)
-                lcp_matrix = lcp_matrix[np.ix_(order, order)]
-            except ImportError:
-                pass  # plot unsorted if scipy unavailable
+            from scipy.cluster.hierarchy import linkage, leaves_list
+            from scipy.spatial.distance import squareform
+            max_lcp = lcp_matrix.max()
+            dist = max_lcp - lcp_matrix
+            np.fill_diagonal(dist, 0)
+            condensed = squareform(dist, checks=False)
+            Z = linkage(condensed, method="average")
+            order = leaves_list(Z)
+            lcp_matrix = lcp_matrix[np.ix_(order, order)]
 
             im = ax.imshow(lcp_matrix, cmap="viridis", aspect="auto", interpolation="nearest")
             plt.colorbar(im, ax=ax, label="LCP (tokens)", shrink=0.8)
@@ -950,9 +953,8 @@ def plot_checkpoint_positions(out_dir, root_dir=None, style_map=None, **_kw):
                     ax.scatter(positions, [round_idx] * len(positions),
                                s=8, color=color, zorder=3, alpha=0.7)
                 pm = e["prefix_match"]
-                if pm > 0:
-                    ax.plot([pm, pm], [round_idx - 0.3, round_idx + 0.3],
-                            color="red", lw=1.2, alpha=0.6)
+                ax.plot([pm, pm], [round_idx - 0.3, round_idx + 0.3],
+                        zorder=999, color="red", lw=1.2, alpha=1.0)
 
             ax.set_title(label, fontsize=8)
             ax.set_yticks(range(len(entries)))
@@ -1137,9 +1139,9 @@ def plot_cache_breakdown(out_dir, root_dir=None, style_map=None, **_kw):
             label, color, *_ = _spec(strat, style_map)
 
             req_idx = np.arange(len(entries))
-            kv_gb = np.array([e.get("cache_kv_bytes", 0) for e in entries]) / 1e9
-            gdn_gb = np.array([e.get("cache_gdn_bytes", 0) for e in entries]) / 1e9
-            n_entries = np.array([e.get("n_cache_entries", 0) for e in entries])
+            kv_gb = np.array([e["cache_kv_bytes"] for e in entries]) / 1e9
+            gdn_gb = np.array([e["cache_gdn_bytes"] for e in entries]) / 1e9
+            n_entries = np.array([e["n_cache_entries"] for e in entries])
 
             ax.fill_between(req_idx, 0, kv_gb, alpha=0.4, color="tab:red", label="KV cache")
             ax.fill_between(req_idx, kv_gb, kv_gb + gdn_gb, alpha=0.4, color="tab:green", label="GDN ckpts")
@@ -1166,6 +1168,546 @@ def plot_cache_breakdown(out_dir, root_dir=None, style_map=None, **_kw):
 
 
 # ---------------------------------------------------------------------------
+# Histogram before/after Laplace smoothing
+# ---------------------------------------------------------------------------
+def plot_histograms(out_dir, root_dir=None, style_map=None, **_kw):
+    """Plot raw vs Laplace-smoothed histograms from histogram strategy solves."""
+    from spase_cache.strategies import laplace_smoothing
+
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping histograms plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+
+    # Find all histogram log files
+    hist_files = sorted(data_dir.glob("e2e_*_histograms.json"))
+    if not hist_files:
+        print("  no histogram log files found, skipping")
+        return
+
+    for hf in hist_files:
+        tag = hf.stem.replace("e2e_", "").replace("_histograms", "")
+        data = json.loads(hf.read_text())
+        entries = data["histogram_log"]
+        alpha = data["laplace_alpha"]
+        bin_size = data["bin_size"]
+
+        if not entries:
+            continue
+
+        n = len(entries)
+        fig, axes = plt.subplots(n, 2, figsize=(14, 3 * n), squeeze=False)
+
+        label = _spec(tag, style_map)[0] if style_map else tag
+
+        for i, entry in enumerate(entries):
+            counts = np.array(entry["counts"])
+            smoothed = laplace_smoothing(counts, alpha)
+            n_obs = entry["n_obs"]
+            x = np.arange(len(counts)) * bin_size
+
+            # Trim to last nonzero + some margin
+            last_nz = max(np.argwhere(counts > 0).max().item() if counts.max() > 0 else 0,
+                          np.argwhere(smoothed > 0).max().item() if smoothed.max() > 0 else 0)
+            trim = min(last_nz + 10, len(counts))
+
+            ax_raw = axes[i, 0]
+            ax_raw.bar(x[:trim], counts[:trim], width=bin_size * 0.8,
+                       color="steelblue", alpha=0.7, edgecolor="white")
+            ax_raw.set_title(f"Raw (solve #{i+1}, n_obs={n_obs})", fontsize=9)
+            ax_raw.set_ylabel("Count")
+            ax_raw.grid(True, alpha=0.3, axis="y")
+
+            ax_sm = axes[i, 1]
+            ax_sm.bar(x[:trim], smoothed[:trim], width=bin_size * 0.8,
+                      color="tab:orange", alpha=0.7, edgecolor="white")
+            ax_sm.set_title(f"Laplace smoothed (α={alpha})", fontsize=9)
+            ax_sm.set_ylabel("Count")
+            ax_sm.grid(True, alpha=0.3, axis="y")
+
+            if i == n - 1:
+                ax_raw.set_xlabel("Token position")
+                ax_sm.set_xlabel("Token position")
+
+        fig.suptitle(f"Histogram evolution — {label} — {model_name}", fontsize=12)
+        plt.tight_layout()
+        out = out_dir / f"histograms_{tag}.png"
+        plt.savefig(out, dpi=200, bbox_inches="tight")
+        print(f"  saved {out}")
+        plt.close()
+
+
+# ---------------------------------------------------------------------------
+# Scatter: tokens to process vs wallclock time
+# ---------------------------------------------------------------------------
+
+def plot_tokens_vs_time(out_dir, root_dir=None, style_map=None, **_kw):
+    """Scatter plot: tokens to process (seq_len - tokens_saved) vs wallclock time."""
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping tokens_vs_time plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    sidx = _build_style_index(summary)
+
+    SKIP_TYPES = {"no_cache"}
+
+    # Precompute max prefix_match across all strategies for sizing
+    max_match_global = 0
+    for tag in summary["strategies"]:
+        jsonl_path = data_dir / f"e2e_{tag}.jsonl"
+        if not jsonl_path.exists():
+            continue
+        for line in jsonl_path.read_text().splitlines():
+            if line.strip():
+                e = json.loads(line)
+                if e["hit"] and e["prefix_match"] > max_match_global:
+                    max_match_global = e["prefix_match"]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    seen_families = set()
+    for tag, _stats in summary["strategies"].items():
+        cfg = sidx[tag]
+        if cfg["type"] in SKIP_TYPES:
+            continue
+        jsonl_path = data_dir / f"e2e_{tag}.jsonl"
+        if not jsonl_path.exists():
+            continue
+        entries = [json.loads(l) for l in jsonl_path.read_text().splitlines() if l.strip()]
+        if not entries:
+            continue
+
+        _, color, marker, _ls, _lw = _spec(tag, style_map)
+        fam = _family_label(tag, style_map)
+
+        hits = [e for e in entries if e["hit"]]
+        misses = [e for e in entries if not e["hit"]]
+
+        # Misses: small grey dots
+        if misses:
+            miss_label = "miss" if "miss" not in seen_families else None
+            seen_families.add("miss")
+            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in misses],
+                       [e["time_s"] for e in misses],
+                       color="grey", marker=".", s=15, alpha=0.4,
+                       label=miss_label, zorder=2)
+
+        # Hits: colored by family, size proportional to match_len
+        if hits:
+            label = fam if fam not in seen_families else None
+            seen_families.add(fam)
+            match_lens = [e["prefix_match"] for e in hits]
+            max_match = max(max_match_global, 1)
+            sizes = [10 + 120 * (m / max_match) for m in match_lens]
+            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in hits],
+                       [e["time_s"] for e in hits],
+                       color=color, marker=marker, s=sizes, alpha=0.6,
+                       label=label, zorder=3)
+
+    ax.set_xlabel("Tokens to process (seq_len − tokens_saved)")
+    ax.set_ylabel("Wall-clock time (s)")
+    ax.set_title(f"Tokens to process vs wall-clock time — {model_name}")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    out_path = out_dir / "tokens_vs_time.png"
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    print(f"  saved {out_path}")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Pareto front — tokens saved vs n_blocks for each strategy family
+# ---------------------------------------------------------------------------
+
+def _pareto_reference_lines(root_dir):
+    """Compute reference lines for Pareto plots.
+
+    Returns (n_convs, perfect_total_savings, perfect_total_time) or None if data unavailable.
+    - n_convs: number of unique conversations (vertical line)
+    - perfect_total_savings: total speedup if all prefix matches are fully cached
+    - perfect_total_time: total time if all prefix matches are fully cached
+    """
+    # n_convs from overlap_lcp.json
+    lcp_path = root_dir / "prepare_data" / "overlap_lcp.json"
+    n_convs = None
+    if lcp_path.exists():
+        lcp_data = json.loads(lcp_path.read_text())
+        n_convs = lcp_data.get("n_conversations")
+
+    # Perfect model from any strategy's JSONL (they all see the same prefix_match)
+    data_dir = root_dir / "benchmark_e2e"
+    perfect_total_savings = None
+    perfect_total_time = None
+    for jsonl_path in sorted(data_dir.glob("e2e_*.jsonl")):
+        tag = jsonl_path.stem.removeprefix("e2e_")
+        if tag == "no_cache":
+            continue
+        entries = [json.loads(l) for l in jsonl_path.read_text().splitlines() if l.strip()]
+        if not entries or "prefix_match" not in entries[0]:
+            continue
+        total_tokens = sum(e["seq_len"] for e in entries)
+        total_recompute = sum(e["seq_len"] - e["prefix_match"] for e in entries)
+        perfect_total_savings = total_tokens / total_recompute if total_recompute > 0 else float("inf")
+        perfect_total_time = sum((e["seq_len"] - e["prefix_match"]) * 0.05 for e in entries)
+        break  # all strategies see the same prefix_match values
+
+    return n_convs, perfect_total_savings, perfect_total_time
+
+
+def _add_reference_lines(ax, n_convs, perfect_value, y_metric):
+    """Add n_convs vertical line and perfect-model horizontal line to an axis."""
+    if n_convs is not None:
+        ax.axvline(n_convs, color="red", linestyle=":", linewidth=1.5, alpha=0.7,
+                   label=f"n_convs = {n_convs}", zorder=2)
+    if perfect_value is not None:
+        ax.axhline(perfect_value, color="blue", linestyle=":", linewidth=1.5, alpha=0.7,
+                   label=f"perfect = {perfect_value:.2f}" if y_metric == "savings" else f"perfect = {perfect_value:.1f}s",
+                   zorder=2)
+
+
+def _load_jsonl_stats(data_dir, tag):
+    """Load per-request JSONL and return (avg_gdn_bytes, avg_n_blocks, avg_speedup, total_speedup, total_time_s)."""
+    jsonl_path = data_dir / f"e2e_{tag}.jsonl"
+    if not jsonl_path.exists():
+        return 0, 0, 1.0, 1.0, 0.0
+    entries = [json.loads(l) for l in jsonl_path.read_text().splitlines() if l.strip()]
+    if not entries:
+        return 0, 0, 1.0, 1.0, 0.0
+    avg_gdn = sum(e["cache_gdn_bytes"] for e in entries) / len(entries)
+    avg_nb = sum(len(e["added_positions"]) for e in entries) / len(entries)
+    avg_speedup = sum(
+        e["seq_len"] / (e["seq_len"] - e["tokens_saved"])
+        for e in entries if e["seq_len"] - e["tokens_saved"] > 0
+    ) / len(entries)
+    total_tokens = sum(e["seq_len"] for e in entries)
+    total_recompute = sum(e["seq_len"] - e["tokens_saved"] for e in entries)
+    total_speedup = total_tokens / total_recompute if total_recompute > 0 else 1.0
+    total_time_s = sum(e["time_s"] for e in entries)
+    return avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s
+
+
+def plot_pareto_broken(out_dir, root_dir=None, style_map=None, break_at=35, reference_lines=False, **_kw):
+    """Pareto front with a broken x-axis: [0, break_at] then [break_at+gap, max].
+
+    ``break_at`` is the n_blocks threshold separating the two panels.
+    Strategies with avg_n_blocks <= break_at go to the left panel,
+    the rest go to the right panel.
+    """
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping pareto_broken plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    sidx = _build_style_index(summary)
+
+    SKIP_TYPES = {"kv_only", "no_cache"}
+
+    # Collect: type -> [(tag, avg_n_blocks, saved%, avg_gdn, avg_speedup, total_speedup, total_time_s)]
+    families = {}
+    for tag, stats in summary["strategies"].items():
+        cfg = sidx[tag]
+        stype = cfg["type"]
+        if stype in SKIP_TYPES:
+            continue
+        tok_saved_frac = stats["tokens_saved"] / stats["tokens_total"] * 100 if stats["tokens_total"] > 0 else 0
+        avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s = _load_jsonl_stats(data_dir, tag)
+        families.setdefault(stype, []).append((tag, avg_nb, tok_saved_frac, avg_gdn, avg_speedup, total_speedup, total_time_s))
+
+    if not families:
+        print("  no budgeted strategies found, skipping pareto_broken plot")
+        return
+
+    # Split points into left (<=break_at) and right (>break_at)
+    all_right_x = []
+    for points in families.values():
+        for p in points:
+            if p[1] > break_at:
+                all_right_x.append(p[1])
+
+    if not all_right_x:
+        # Nothing beyond break_at — fall back to normal pareto
+        plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, reference_lines=reference_lines, **_kw)
+        return
+
+    right_lo = min(all_right_x) * 0.9
+    right_hi = max(all_right_x) * 1.1
+
+    if reference_lines:
+        n_convs, perfect_total_savings, perfect_total_time = _pareto_reference_lines(root_dir)
+    else:
+        n_convs = perfect_total_savings = perfect_total_time = None
+
+    # --- Helper to draw one metric on a broken-axis figure ---
+    def _draw_broken(ylabel, title_suffix, y_idx, out_name, y_metric="savings"):
+        fig, (ax_l, ax_r) = plt.subplots(
+            1, 2, sharey=True, figsize=(10, 6),
+            gridspec_kw={"width_ratios": [3, 1], "wspace": 0.08},
+        )
+
+        for stype, points in sorted(families.items()):
+            points.sort(key=lambda x: x[1])
+            rep_tag = points[0][0]
+            _, color, marker, ls, lw = _spec(rep_tag, style_map)
+            fam = _family_label(rep_tag, style_map)
+
+            xs = [p[1] for p in points]
+            ys = [p[y_idx] for p in points]
+
+            # Plot the full series on BOTH axes (matplotlib clips to xlim)
+            ax_l.plot(xs, ys, color=color, marker=marker, ls=ls, lw=lw,
+                      markersize=8, label=fam, zorder=3)
+            ax_r.plot(xs, ys, color=color, marker=marker, ls=ls, lw=lw,
+                      markersize=8, zorder=3)
+
+        ax_l.set_xlim(0, break_at * 1.05)
+        ax_r.set_xlim(right_lo, right_hi)
+
+        # Diagonal break marks on axes
+        d = 0.015
+        kwargs = dict(transform=ax_l.transAxes, color="k", clip_on=False, lw=1)
+        ax_l.plot((1 - d, 1 + d), (-d, +d), **kwargs)
+        ax_l.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
+        kwargs["transform"] = ax_r.transAxes
+        ax_r.plot((-d, +d), (-d, +d), **kwargs)
+        ax_r.plot((-d, +d), (1 - d, 1 + d), **kwargs)
+
+        # Draw "//" break indicator between panels for each family that spans the break
+        for stype, points in sorted(families.items()):
+            points.sort(key=lambda x: x[1])
+            xs = [p[1] for p in points]
+            ys = [p[y_idx] for p in points]
+            has_left = any(x <= break_at for x in xs)
+            has_right = any(x > break_at for x in xs)
+            if not (has_left and has_right):
+                continue
+            rep_tag = points[0][0]
+            _, color, _, _, _ = _spec(rep_tag, style_map)
+            # Find the last left point and first right point
+            last_left_y = [y for x, y in zip(xs, ys) if x <= break_at][-1]
+            first_right_y = [y for x, y in zip(xs, ys) if x > break_at][0]
+            # Interpolate y at the midpoint of the gap (in figure coords)
+            mid_y = (last_left_y + first_right_y) / 2
+            # Place "//" text in the gap using figure-level coordinates
+            # Convert data y to figure y via ax_l
+            fig_y = ax_l.transData.transform((0, mid_y))[1]
+            fig_y = fig.transFigure.inverted().transform((0, fig_y))[1]
+            # x position: midpoint between the two axes
+            bbox_l = ax_l.get_position()
+            bbox_r = ax_r.get_position()
+            fig_x = (bbox_l.x1 + bbox_r.x0) / 2
+            fig.text(fig_x, fig_y, "//", ha="center", va="center",
+                     fontsize=11, fontweight="bold", color=color, rotation=15)
+
+        ax_l.spines["right"].set_visible(False)
+        ax_r.spines["left"].set_visible(False)
+        ax_r.tick_params(left=False)
+
+        ax_l.set_xlabel("Avg number of GDN checkpoints")
+        ax_l.set_ylabel(ylabel)
+        ax_r.set_xlabel("")
+        fig.suptitle(f"Pareto front: {title_suffix}", fontsize=13)
+
+        # Reference lines
+        perfect_val = perfect_total_savings if y_metric == "savings" else perfect_total_time
+        _add_reference_lines(ax_l, n_convs, perfect_val, y_metric)
+        _add_reference_lines(ax_r, n_convs, perfect_val, y_metric)
+
+        # Legend from left axis only (it has all families)
+        ax_l.legend(fontsize=9)
+
+        ax_l.grid(True, alpha=0.3)
+        ax_r.grid(True, alpha=0.3)
+
+        out_path = out_dir / out_name
+        fig.savefig(out_path, dpi=200, bbox_inches="tight")
+        print(f"  saved {out_path}")
+        plt.close(fig)
+
+    # Panel: total savings
+    _draw_broken("Total savings (\u00d7)", "total savings vs checkpoint budget", 5, "pareto_broken_total_savings.png", y_metric="savings")
+    # Panel: total time
+    _draw_broken("Total processing time (s)", f"total time vs checkpoint budget \u2014 {model_name}", 6, "pareto_broken_total_time.png", y_metric="time")
+
+    # Print table (same as plot_pareto)
+    print(f"\n  {'Strategy':<30} {'Avg n_blk':>9} {'Saved%':>8} {'Avg spd':>8} {'Tot spd':>8} {'Tot time':>10} {'Avg GDN (MB)':>12}")
+    print(f"  {'-'*91}")
+    for stype, points in sorted(families.items()):
+        points.sort(key=lambda x: x[1])
+        for tag, nb, saved, gdn, avg_spd, tot_spd, tot_time in points:
+            label = _spec(tag, style_map)[0]
+            print(f"  {label:<30} {nb:>9.1f} {saved:>7.1f}% {avg_spd:>7.2f}\u00d7 {tot_spd:>7.2f}\u00d7 {tot_time:>9.1f}s {gdn/1024/1024:>11.2f}")
+
+
+def plot_pareto(out_dir, root_dir=None, style_map=None, reference_lines=False, **_kw):
+    """Plot Pareto front: tokens_saved (%) vs avg GDN cache size."""
+    out_dir = Path(out_dir)
+    root_dir = Path(root_dir) if root_dir else out_dir
+    data_dir = root_dir / "benchmark_e2e"
+    summary_path = data_dir / "e2e_summary.json"
+    if not summary_path.exists():
+        print(f"  skipping pareto plot ({summary_path} not found)")
+        return
+
+    summary = json.loads(summary_path.read_text())
+    model_name = summary["model_name"]
+    sidx = _build_style_index(summary)
+
+    SKIP_TYPES = {"kv_only", "no_cache"}
+
+    # Collect: type -> [(tag, avg_n_blocks, saved%, avg_gdn_bytes, avg_speedup, total_speedup, total_time_s)]
+    families = {}
+
+    for tag, stats in summary["strategies"].items():
+        cfg = sidx[tag]
+        stype = cfg["type"]
+        if stype in SKIP_TYPES:
+            continue
+        tok_saved_frac = stats["tokens_saved"] / stats["tokens_total"] * 100 if stats["tokens_total"] > 0 else 0
+        avg_gdn, avg_nb, avg_speedup, total_speedup, total_time_s = _load_jsonl_stats(data_dir, tag)
+        nb = avg_nb
+        families.setdefault(stype, []).append((tag, nb, tok_saved_frac, avg_gdn, avg_speedup, total_speedup, total_time_s))
+
+    if not families:
+        print("  no budgeted strategies found, skipping pareto plot")
+        return
+
+    if reference_lines:
+        n_convs, perfect_total_savings, perfect_total_time = _pareto_reference_lines(root_dir)
+    else:
+        n_convs = perfect_total_savings = perfect_total_time = None
+
+    # --- Panel 1: tokens_saved% vs avg n_blocks ---
+    # fig1, ax1 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # ax1.plot([p[1] for p in points], [p[2] for p in points],
+                 # color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax1.set_xlabel("Avg number of GDN checkpoints")
+    # ax1.set_ylabel("Tokens saved (%)")
+    # ax1.set_title(f"Pareto front: savings vs checkpoint budget — {model_name}")
+    # ax1.legend(fontsize=9)
+    # ax1.grid(True, alpha=0.3)
+    # out1 = out_dir / "pareto_nblocks.png"
+    # fig1.savefig(out1, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out1}")
+    # plt.close(fig1)
+ 
+    # --- Panel 2: tokens_saved% vs avg GDN cache size (MB) ---
+    # fig2, ax2 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # gdn_mb = [p[3] / 1024 / 1024 for p in points]
+        # saved = [p[2] for p in points]
+        # ax2.plot(gdn_mb, saved, color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax2.set_xlabel("Avg GDN cache size (MB)")
+    # ax2.set_ylabel("Tokens saved (%)")
+    # ax2.set_title(f"Pareto front: savings vs GDN memory — {model_name}")
+    # ax2.legend(fontsize=9)
+    # ax2.grid(True, alpha=0.3)
+    # out2 = out_dir / "pareto_gdn_mb.png"
+    # fig2.savefig(out2, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out2}")
+    # plt.close(fig2)
+ 
+    # --- Panel 3: avg theoretical speedup vs avg n_blocks ---
+    # fig3, ax3 = plt.subplots(figsize=(8, 6))
+    # for stype, points in sorted(families.items()):
+        # points.sort(key=lambda x: x[1])
+        # rep_tag = points[0][0]
+        # _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        # fam = _family_label(rep_tag, style_map)
+        # ax3.plot([p[1] for p in points], [p[4] for p in points],
+                 # color=color, marker=marker, ls=ls, lw=lw,
+                 # markersize=8, label=fam, zorder=3)
+    # ax3.set_xlabel("Avg number of GDN checkpoints")
+    # ax3.set_ylabel("Avg per-request speedup (×)")
+    # ax3.set_title(f"Pareto front: avg speedup vs checkpoint budget — {model_name}")
+    # ax3.legend(fontsize=9)
+    # ax3.grid(True, alpha=0.3)
+    # out3 = out_dir / "pareto_speedup.png"
+    # fig3.savefig(out3, dpi=200, bbox_inches="tight")
+    # print(f"  saved {out3}")
+    # plt.close(fig3)
+ 
+    # --- Panel 4: total speedup vs avg n_blocks ---
+    fig4, ax4 = plt.subplots(figsize=(8, 6))
+    for stype, points in sorted(families.items()):
+        points.sort(key=lambda x: x[1])
+        rep_tag = points[0][0]
+        _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        fam = _family_label(rep_tag, style_map)
+        ax4.plot([p[1] for p in points], [p[5] for p in points],
+                 color=color, marker=marker, ls=ls, lw=lw,
+                 markersize=8, label=fam, zorder=3)
+    ax4.set_xlabel("Avg number of GDN checkpoints")
+    ax4.set_ylabel("Total savings (×)")
+    ax4.set_title(f"Pareto front: total savings vs checkpoint budget")
+    _add_reference_lines(ax4, n_convs, perfect_total_savings, "savings")
+    ax4.legend(fontsize=9)
+    ax4.grid(True, alpha=0.3)
+    out4 = out_dir / "pareto_total_savings.png"
+    fig4.savefig(out4, dpi=200, bbox_inches="tight")
+    print(f"  saved {out4}")
+    plt.close(fig4)
+
+    # --- Panel 5: total processing time vs avg n_blocks ---
+    fig5, ax5 = plt.subplots(figsize=(8, 6))
+    for stype, points in sorted(families.items()):
+        points.sort(key=lambda x: x[1])
+        rep_tag = points[0][0]
+        _, color, marker, ls, lw = _spec(rep_tag, style_map)
+        fam = _family_label(rep_tag, style_map)
+        ax5.plot([p[1] for p in points], [p[6] for p in points],
+                 color=color, marker=marker, ls=ls, lw=lw,
+                 markersize=8, label=fam, zorder=3)
+    ax5.set_xlabel("Avg number of GDN checkpoints")
+    ax5.set_ylabel("Total processing time (s)")
+    ax5.set_title(f"Pareto front: total time vs checkpoint budget — {model_name}")
+    _add_reference_lines(ax5, n_convs, perfect_total_time, "time")
+    ax5.legend(fontsize=9)
+    ax5.grid(True, alpha=0.3)
+    out5 = out_dir / "pareto_total_time.png"
+    fig5.savefig(out5, dpi=200, bbox_inches="tight")
+    print(f"  saved {out5}")
+    plt.close(fig5)
+
+    # Print table
+    print(f"\n  {'Strategy':<30} {'Avg n_blk':>9} {'Saved%':>8} {'Avg spd':>8} {'Tot spd':>8} {'Tot time':>10} {'Avg GDN (MB)':>12}")
+    print(f"  {'-'*91}")
+    for stype, points in sorted(families.items()):
+        points.sort(key=lambda x: x[1])
+        for tag, nb, saved, gdn, avg_spd, tot_spd, tot_time in points:
+            label = _spec(tag, style_map)[0]
+            print(f"  {label:<30} {nb:>9.1f} {saved:>7.1f}% {avg_spd:>7.2f}× {tot_spd:>7.2f}× {tot_time:>9.1f}s {gdn/1024/1024:>11.2f}")
+
+
+# ---------------------------------------------------------------------------
 # Composite targets
 # ---------------------------------------------------------------------------
 def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
@@ -1180,7 +1722,9 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_checkpoint_positions(out_dir, root_dir=root_dir, style_map=style_map)
     plot_gdn_gap(out_dir, root_dir=root_dir, style_map=style_map)
     plot_cache_breakdown(out_dir, root_dir=root_dir, style_map=style_map)
-
+    plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_tokens_vs_time(out_dir, root_dir=root_dir, style_map=style_map)
+    plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
 
 # ---------------------------------------------------------------------------
 # Hydra entry point — dispatches via plot._target_

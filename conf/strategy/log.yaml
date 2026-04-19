@@ -1,6 +1,7 @@
 start_at: 768
 tag: "log_${start_at}"
 type: "diadic"
-label: "Logarithmic (starting at ${start_at})"
+family_label: "Logarithmic"
+label: "Logarithmic (start=${start_at})"
 color: "tab:orange"
 marker: "v"

@@ -1,0 +1,13 @@
+defaults:
+  - base
+  - _self_
+
+_target_: spase_cache.datasets.single_doc_qa.MuLDDataset
+name: narrativeqa
+format: revision
+processed: data/narrativeqa_${run_name}.parquet
+subset: NarrativeQA
+min_questions: 2
+max_questions: 100
+max_convs: 100 
+split: train

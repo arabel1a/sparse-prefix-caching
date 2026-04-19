@@ -86,8 +86,9 @@ def compute_overlap(out_dir, full_cfg, **_kw):
     }))
 
     n_hits = sum(1 for l in lcp_lengths if l > 0)
+    pct = n_hits / len(lcp_lengths) * 100 if lcp_lengths else 0.0
     log.info("%d/%d test requests had cache hits (%.1f%%)",
-             n_hits, len(lcp_lengths), n_hits / len(lcp_lengths) * 100)
+             n_hits, len(lcp_lengths), pct)
     log.info("Overlap results saved to %s", overlap_path)
 
 

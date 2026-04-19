@@ -1,11 +1,10 @@
 defaults:
-  - _self_
   - base
+  - _self_
 
-_target_: spase_cache.datasets.squad.SquadDataset
+_target_: spase_cache.datasets.single_doc_qa.SquadDataset
 name: squad
 format: revision
 processed: data/squad_${run_name}.parquet
 min_questions: 3
 split: train
-avg_req_len: 250

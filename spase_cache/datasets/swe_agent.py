@@ -41,22 +41,20 @@ class SweAgentDataset(Dataset):
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg)
         self._tokens = {}
+        assert False, "outdated"
 
     def prepare(self, tokenizer) -> None:
         from datasets import load_dataset
 
         cfg = self.cfg
-        split = cfg.get("split", "train")
-        max_sessions = cfg.get("max_sessions", 5000)
-        max_rows = cfg.get("max_rows", None)
-        ds = load_dataset("nebius/SWE-agent-trajectories", split=split, streaming=True)
+        ds = load_dataset("nebius/SWE-agent-trajectories", split=cfg.split, streaming=True)
 
         rows = []
         n_sessions = 0
         for idx, row in enumerate(ds):
-            if n_sessions >= max_sessions:
+            if n_sessions >= cfg.max_sessions:
                 break
-            if max_rows and len(rows) >= max_rows:
+            if len(rows) >= cfg.max_rows:
                 break
             instance_id = row["instance_id"]
             model = row.get("model_name", "unknown")
@@ -76,17 +74,14 @@ class SweAgentDataset(Dataset):
         log.info("SWE-agent: %d trajectories, %d calls",
                  len(set(r["traj_idx"] for r in rows)), len(rows))
 
-        max_rows = cfg.get("max_rows", len(rows))
-        if len(rows) > max_rows:
-            rows = rows[:max_rows]
-            log.info("Capped to %d rows (max_rows)", max_rows)
+        if len(rows) > cfg.max_rows:
+            rows = rows[:cfg.max_rows]
+            log.info("Capped to %d rows (max_rows)", cfg.max_rows)
 
-        # Tokenize
-        chunk_size = cfg.get("tokenizer_chunk_size", 16)
         texts = [r["text"] for r in rows]
         all_tokens = []
-        for i in tqdm(range(0, len(texts), chunk_size), desc="tokenizing"):
-            chunk = texts[i:i + chunk_size]
+        for i in tqdm(range(0, len(texts), cfg.tokenizer_chunk_size), desc="tokenizing"):
+            chunk = texts[i:i + cfg.tokenizer_chunk_size]
             for ids in tokenizer(chunk, add_special_tokens=False, truncation=True,
                                  max_length=cfg.max_seq_len)["input_ids"]:
                 all_tokens.append(np.array(ids, dtype=np.int32))
@@ -99,11 +94,9 @@ class SweAgentDataset(Dataset):
             "n_tokens": [len(t) for t in all_tokens],
         })
 
-        min_seq_len = cfg.get("min_seq_len", 0)
-        if min_seq_len > 0:
-            n_before = len(df)
-            df = df.filter(pl.col("n_tokens") >= min_seq_len)
-            log.info("Dropped %d calls shorter than %d tokens", n_before - len(df), min_seq_len)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") >= cfg.min_seq_len)
+        log.info("Dropped %d calls shorter than %d tokens", n_before - len(df), cfg.min_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

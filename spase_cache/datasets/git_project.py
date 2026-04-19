@@ -52,12 +52,9 @@ def _get_renames(repo_dir: Path, parent: str, child: str) -> dict[str, str]:
 
 
 def _get_file_content(repo_dir: Path, commit: str, path: str) -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "show", f"{commit}:{path}"], cwd=repo_dir
-        ).decode(errors="replace")
-    except subprocess.CalledProcessError:
-        return ""
+    return subprocess.check_output(
+        ["git", "show", f"{commit}:{path}"], cwd=repo_dir
+    ).decode(errors="replace")
 
 
 def _build_snapshot(repo_dir: Path, commit: str, ordered_files: list[str]) -> str:
@@ -81,11 +78,8 @@ class GitProjectDataset(Dataset):
         cfg = self.cfg
         repo_dir = Path(cfg.fetch.repo_dir).resolve()
         extensions = set(cfg.fetch.extensions)
-        max_revisions = cfg.get("max_revisions", 1000)
-
         commits = _get_commits(repo_dir)
-        max_rows = cfg.get("max_rows", len(commits))
-        limit = min(max_revisions, max_rows) if max_revisions else max_rows
+        limit = min(cfg.max_revisions, cfg.max_rows)
         commits = commits[:limit]
         log.info("Processing %d commits from %s", len(commits), repo_dir)
 
@@ -112,18 +106,15 @@ class GitProjectDataset(Dataset):
             snapshot = _build_snapshot(repo_dir, commit, ordered_files)
             rows.append({"commit": commit, "snapshot": snapshot})
 
-        max_rows = cfg.get("max_rows", len(rows))
-        if len(rows) > max_rows:
-            rows = rows[:max_rows]
-            log.info("Capped to %d rows (max_rows)", max_rows)
+        if len(rows) > cfg.max_rows:
+            rows = rows[:cfg.max_rows]
+            log.info("Capped to %d rows (max_rows)", cfg.max_rows)
 
-        # Tokenize
         log.info("Tokenizing %d snapshots...", len(rows))
-        chunk_size = cfg.get("tokenizer_chunk_size", 16)
         snapshots = [r["snapshot"] for r in rows]
         all_tokens = []
-        for i in tqdm(range(0, len(snapshots), chunk_size), desc="tokenizing"):
-            chunk = snapshots[i:i + chunk_size]
+        for i in tqdm(range(0, len(snapshots), cfg.tokenizer_chunk_size), desc="tokenizing"):
+            chunk = snapshots[i:i + cfg.tokenizer_chunk_size]
             for ids in tokenizer(chunk, add_special_tokens=False, truncation=True,
                                  max_length=cfg.max_seq_len)["input_ids"]:
                 all_tokens.append(np.array(ids, dtype=np.int32))
@@ -136,11 +127,9 @@ class GitProjectDataset(Dataset):
         })
 
         # Drop short snapshots
-        min_seq_len = cfg.get("min_seq_len", 0)
-        if min_seq_len > 0:
-            n_before = len(df)
-            df = df.filter(pl.col("n_tokens") >= min_seq_len)
-            log.info("Dropped %d snapshots shorter than %d tokens", n_before - len(df), min_seq_len)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") >= cfg.min_seq_len)
+        log.info("Dropped %d snapshots shorter than %d tokens", n_before - len(df), cfg.min_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

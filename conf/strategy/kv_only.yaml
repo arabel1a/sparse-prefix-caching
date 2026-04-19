@@ -1,5 +1,7 @@
 tag: "kv_only"
 type: "kv_only"
+family_label: "KV only"
 label: "KV cache only"
 color: "tab:red"
 marker: "s"
+save_last: False

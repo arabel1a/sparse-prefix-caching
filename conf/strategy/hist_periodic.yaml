@@ -2,7 +2,11 @@ tag: "hist_periodic"
 type: "histogram_periodic"
 n_blocks: 1
 bin_size: 128
-label: "DP-optimal (periodic H=100)"
+gamma: 1.0
+replan_interval: 100
+family_label: "DP-periodic"
+label: "DP-periodic (H=100)"
 color: "tab:brown"
 marker: "P"
 linestyle: "--"
+adaptive_backtrack: True

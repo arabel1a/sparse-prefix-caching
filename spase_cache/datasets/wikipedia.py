@@ -97,21 +97,20 @@ class WikipediaDataset(Dataset):
         raw_dir.mkdir(parents=True, exist_ok=True)
 
         # Fetch if needed
-        if not cfg.get("skip_fetch", True):
-            articles = list(cfg.fetch.articles)
-            max_rev = cfg.fetch.get("max_revisions", 500)
-            min_words = cfg.fetch.get("min_words", 6000)
-            for title in articles:
+        if not cfg.skip_fetch:
+            for title in cfg.fetch.articles:
                 slug = _slug(title)
                 outpath = raw_dir / f"{slug}.jsonl"
                 if outpath.exists():
                     n = sum(1 for _ in open(outpath))
                     log.info("[skip] %s: %s already exists (%d revisions)", title, outpath, n)
                     continue
-                log.info("[fetch] %s (up to %d revisions)...", title, max_rev)
-                revisions = _fetch_revisions(title, max_rev)
-                kept = [r for r in revisions if len(r["text"].split()) >= min_words]
-                log.info("  %d total -> %d with >= %d words", len(revisions), len(kept), min_words)
+                log.info("[fetch] %s (up to %d revisions)...", title, cfg.fetch.max_revisions)
+                revisions = _fetch_revisions(title, cfg.fetch.max_revisions)
+                kept = [r for r in revisions
+                        if cfg.fetch.min_words <= len(r["text"].split()) <= cfg.fetch.max_words]
+                log.info("  %d total -> %d with %d-%d words",
+                         len(revisions), len(kept), cfg.fetch.min_words, cfg.fetch.max_words)
                 with open(outpath, "w") as f:
                     for r in kept:
                         f.write(json.dumps(r) + "\n")
@@ -122,7 +121,7 @@ class WikipediaDataset(Dataset):
             raise FileNotFoundError(f"No .jsonl files in {raw_dir}. Set skip_fetch=false to download.")
 
         all_rows = []
-        for jf in jsonl_files:
+        for jf in jsonl_files[:cfg.max_convs]:
             slug = jf.stem
             with open(jf) as f:
                 for line in f:
@@ -136,7 +135,6 @@ class WikipediaDataset(Dataset):
         log.info("Read %d revisions from %d articles", len(all_rows), len(jsonl_files))
 
         # Tokenize
-        max_revisions = cfg.get("max_revisions", 500)
         # Group by article, limit revisions per article
         from collections import defaultdict
         by_article = defaultdict(list)
@@ -144,19 +142,17 @@ class WikipediaDataset(Dataset):
             by_article[row["slug"]].append(row)
         limited_rows = []
         for slug in sorted(by_article):
-            limited_rows.extend(by_article[slug][:max_revisions])
+            limited_rows.extend(by_article[slug][:cfg.max_revisions])
 
-        max_rows = cfg.get("max_rows", len(limited_rows))
-        if len(limited_rows) > max_rows:
-            limited_rows = limited_rows[:max_rows]
-            log.info("Capped to %d rows (max_rows)", max_rows)
+        if len(limited_rows) > cfg.max_rows:
+            limited_rows = limited_rows[:cfg.max_rows]
+            log.info("Capped to %d rows (max_rows)", cfg.max_rows)
 
         log.info("Tokenizing %d revisions...", len(limited_rows))
-        chunk_size = cfg.get("tokenizer_chunk_size", 16)
         texts = [r["text"] for r in limited_rows]
         all_tokens = []
-        for i in tqdm(range(0, len(texts), chunk_size), desc="tokenizing"):
-            chunk = texts[i:i + chunk_size]
+        for i in tqdm(range(0, len(texts), cfg.tokenizer_chunk_size), desc="tokenizing"):
+            chunk = texts[i:i + cfg.tokenizer_chunk_size]
             for ids in tokenizer(chunk, add_special_tokens=False, truncation=True,
                                  max_length=cfg.max_seq_len)["input_ids"]:
                 all_tokens.append(np.array(ids, dtype=np.int32))
@@ -169,11 +165,15 @@ class WikipediaDataset(Dataset):
         })
 
         # Drop short
-        min_seq_len = cfg.get("min_seq_len", 0)
-        if min_seq_len > 0:
-            n_before = len(df)
-            df = df.filter(pl.col("n_tokens") >= min_seq_len)
-            log.info("Dropped %d revisions shorter than %d tokens", n_before - len(df), min_seq_len)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") >= cfg.min_seq_len)
+        log.info("Dropped %d revisions shorter than %d tokens", n_before - len(df), cfg.min_seq_len)
+
+        # Drop truncated (hit max_seq_len ceiling)
+        n_before = len(df)
+        df = df.filter(pl.col("n_tokens") < cfg.max_seq_len)
+        if n_before - len(df) > 0:
+            log.info("Dropped %d truncated revisions (>= %d tokens)", n_before - len(df), cfg.max_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -51,7 +51,7 @@ class Dataset(ABC):
     def load(self, seed: int = 42) -> None:
         """Load data, then interleave if configured. Call once."""
         self._load()
-        if self.cfg.get("interleave", False):
+        if self.cfg.interleave:
             log.info("Interleaving %d requests (seed=%d)...", len(self._requests), seed)
             self._requests = _interleave(self._requests, seed)
 
@@ -61,6 +61,6 @@ class Dataset(ABC):
 
     def train_test_split(self, train_frac=None):
         if train_frac is None:
-            train_frac = self.cfg.get("train_frac", 0.5)
+            train_frac = self.cfg.train_frac
         n_train = int(len(self.requests) * train_frac)
         return self.requests[:n_train], self.requests[n_train:]

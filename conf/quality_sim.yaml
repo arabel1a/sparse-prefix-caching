@@ -1,0 +1,12 @@
+defaults:
+  - quality_clean
+  - _self_
+
+run_name: sim
+overwrite: True
+
+data:
+  max_rows: 10000
+
+benchmark_e2e:
+  dry_run: True

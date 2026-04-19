@@ -1,0 +1,21 @@
+defaults:
+  - base
+  - _self_
+
+_target_: spase_cache.datasets.synthetic.SyntheticDataset
+name: synthetic
+format: synthetic
+interleave: false
+
+# Experiment 1 from sanity check: all lengths = N, all overlaps = K
+seq_len: 4096          # N: fixed sequence length
+overlap_dist: fixed    # uniform, normal, fixed
+overlap_length: 2048   # K: for fixed dist
+overlap_min: 0         # for uniform/normal
+overlap_max: ${data.seq_len}  # for uniform/normal
+overlap_mu: 2867       # for normal (0.7 * seq_len)
+overlap_sigma: 410     # for normal (0.1 * seq_len)
+
+n_convs: 10            # number of distinct conversations (anchor strings)
+n_requests: 1000       # total number of requests to generate
+seed: 42

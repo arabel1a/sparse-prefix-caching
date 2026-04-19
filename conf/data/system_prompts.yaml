@@ -1,0 +1,13 @@
+defaults:
+  - base
+  - _self_
+
+_target_: spase_cache.datasets.system_prompts.LeakedPromptsDataset
+name: system_prompts
+format: system_prompt
+processed: data/system_prompts_${run_name}.parquet
+prompts_dir: data/system_prompts_leaks
+sharegpt_path: data/chatgpt_results_final_language_filtered.csv
+min_prompt_chars: 5000
+max_prompt_chars: 50000
+queries_per_prompt: 30

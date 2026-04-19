@@ -1,0 +1,11 @@
+defaults:
+  - base
+  - _self_
+
+_target_: spase_cache.datasets.single_doc_qa.QuALITYDataset
+name: quality
+format: revision
+processed: data/quality_${run_name}.parquet
+min_questions: 2
+max_requests: 99999999
+split: train

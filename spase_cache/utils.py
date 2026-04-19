@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import yaml
 from omegaconf import DictConfig, OmegaConf
 
 OmegaConf.register_new_resolver("eval", eval, use_cache=True)
@@ -37,35 +36,33 @@ _STRATEGY_DIR = Path(__file__).resolve().parent.parent / "conf" / "strategy"
 
 
 def resolve_strategies(cfg):
-    """Resolve strategy name list into full strategy configs.
+    """Resolve strategy dict {tag: {overrides}} into a list of configs.
 
-    Each entry in cfg.strategies is either a plain string (strategy name)
-    or a single-key dict {name: {overrides}}.  We load the corresponding
-    YAML from conf/strategy/<name>.yaml and merge overrides on top.
+    Uses OmegaConf.load/merge so base.yaml defaults and ${} interpolations
+    work natively. ``_base_`` override selects which YAML to load (defaults
+    to the tag).
     """
+    strategy_defaults = OmegaConf.to_container(cfg.strategy_defaults, resolve=True)
+
     resolved = []
-    for entry in cfg.strategies:
-        if isinstance(entry, str):
-            name, overrides = entry, {}
-        else:
-            # single-key dict: {"hist_frozen": {"n_blocks": 2}}
-            name = list(entry.keys())[0]
-            overrides = dict(entry[name])
+    for tag, overrides in cfg.strategies.items():
+        # Resolve top-level interpolations (e.g. ${n_blocks_when_kvcache_equals_gdncache})
+        overrides = OmegaConf.to_container(overrides, resolve=True) if overrides else {}
+        name = overrides.pop("_base_", tag)
 
         yaml_path = _STRATEGY_DIR / f"{name}.yaml"
         if not yaml_path.exists():
             raise FileNotFoundError(f"Strategy config not found: {yaml_path}")
 
-        with open(yaml_path) as f:
-            base = yaml.safe_load(f)
-        base.update(overrides)
-        # Resolve ${key} interpolations within each strategy dict
-        for k, v in base.items():
+        strat_cfg = OmegaConf.load(yaml_path)
+        merged = OmegaConf.to_container(OmegaConf.merge(strat_cfg, strategy_defaults, overrides, {"tag": tag}))
+        # Resolve ${key} references to sibling keys within each strategy dict
+        for k, v in merged.items():
             if isinstance(v, str) and "${" in v:
-                base[k] = v.replace("${", "{").format_map(base)
-        resolved.append(base)
+                merged[k] = v.replace("${", "{").format_map(merged)
+        resolved.append(merged)
 
-    OmegaConf.update(cfg, "strategies", resolved)
+    cfg.strategies = OmegaConf.create(resolved)
     log.info("resolved %d strategies: %s", len(resolved), [s["tag"] for s in resolved])
 
 
@@ -124,13 +121,13 @@ def setup_output_dir(cfg, task: str):
 
     out_dir = root_dir / task
     if out_dir.exists():
-        if not cfg.get("overwrite", True): 
+        if not cfg.overwrite:
             raise FileExistsError(f"Output dir already exists and overwrite=False: {out_dir}")
         else:
              shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    level = getattr(logging, cfg.get("log_level", "INFO").upper(), logging.INFO)
+    level = getattr(logging, cfg.log_level.upper())
 
     file_handler = logging.FileHandler(out_dir / "run.log")
     file_handler.setLevel(level)
@@ -499,9 +496,9 @@ class PrefixCache:
     entry for a given conv_id whose prefix_tokens best matches the query.
     """
 
-    def __init__(self, kv_budget_bytes, gdn_budget_bytes):
-        self.kv_budget = kv_budget_bytes
-        self.gdn_budget = gdn_budget_bytes
+    def __init__(self, kv_budget_gb, gdn_budget_gb, **ignored):
+        self.kv_budget = int(kv_budget_gb * 1e9)
+        self.gdn_budget = int(gdn_budget_gb * 1e9)
         self.kv_used = 0
         self.gdn_used = 0
         self.entries = OrderedDict()  # (conv_id, seq_id) -> (store, kv_bytes, gdn_bytes)
@@ -519,7 +516,7 @@ class PrefixCache:
         """
         best_store = None
         best_len = 0
-        for key in self._conv_entries.get(conv_id, []):
+        for key in self._conv_entries[conv_id]:
             if key not in self.entries:
                 continue
             store = self.entries[key][0]
@@ -550,10 +547,7 @@ class PrefixCache:
             # clean up conv index
             ecid = evicted_key[0]
             if ecid in self._conv_entries:
-                try:
-                    self._conv_entries[ecid].remove(evicted_key)
-                except ValueError:
-                    pass
+                self._conv_entries[ecid].remove(evicted_key)
                 if not self._conv_entries[ecid]:
                     del self._conv_entries[ecid]
 
@@ -571,3 +565,102 @@ class PrefixCache:
     @property
     def used(self):
         return self.kv_used + self.gdn_used
+
+    def stats(self):
+        return {
+            "type": "PrefixCache",
+            "n_entries": self.n_entries,
+            "kv_budget_gb": self.kv_budget / 1e9,
+            "gdn_budget_gb": self.gdn_budget / 1e9,
+            "kv_used_gb": self.kv_used / 1e9,
+            "gdn_used_gb": self.gdn_used / 1e9,
+        }
+
+
+class FixedSizeCache:
+    """Simple FIFO cache that stores exactly up to max_sequences entries.
+
+    No memory budget tracking — just evicts oldest when full.
+    """
+
+    def __init__(self, max_cached_sequences, **ignored):
+        self.max_sequences = max_cached_sequences
+        self.entries = OrderedDict()  # (conv_id, seq_id) -> store
+        self._conv_entries = defaultdict(list)
+        self._next_id = 0
+
+    def find_best_prefix(self, conv_id, input_ids):
+        best_store = None
+        best_len = 0
+        for key in self._conv_entries[conv_id]:
+            if key not in self.entries:
+                continue
+            store = self.entries[key]
+            if store.prefix_tokens is None:
+                continue
+            ml = _prefix_match_len(store.prefix_tokens, input_ids)
+            if ml > best_len:
+                best_len = ml
+                best_store = store
+        return best_store, best_len
+
+    def put(self, conv_id, store, _size_bytes=None):
+        while self.entries and len(self.entries) >= self.max_sequences:
+            evicted_key, _ = self.entries.popitem(last=False)
+            ecid = evicted_key[0]
+            if ecid in self._conv_entries:
+                self._conv_entries[ecid].remove(evicted_key)
+                if not self._conv_entries[ecid]:
+                    del self._conv_entries[ecid]
+
+        key = (conv_id, self._next_id)
+        self._next_id += 1
+        self.entries[key] = store
+        self._conv_entries[conv_id].append(key)
+
+    @property
+    def n_entries(self):
+        return len(self.entries)
+
+    @property
+    def kv_used(self):
+        return sum(s.kv_bytes() for s in self.entries.values())
+
+    @property
+    def gdn_used(self):
+        return sum(s.gdn_bytes() for s in self.entries.values())
+
+    def stats(self):
+        return {
+            "type": "FixedSizeCache",
+            "n_entries": self.n_entries,
+            "max_cached_sequences": self.max_sequences,
+            "kv_used_gb": self.kv_used / 1e9,
+            "gdn_used_gb": self.gdn_used / 1e9,
+        }
+
+
+class DryRunStore:
+    """Lightweight fake store for dry-run simulation — no tensors, just metadata."""
+    def __init__(self, prefix_tokens, positions, kv_bytes_per_tok, gdn_bytes_per_ckpt):
+        self.prefix_tokens = prefix_tokens
+        self.kv_len = len(prefix_tokens)
+        self._positions = sorted(positions)
+        self._kv_bytes = kv_bytes_per_tok * self.kv_len
+        self._gdn_bytes = gdn_bytes_per_ckpt * len(positions)
+
+    def best_checkpoint(self, seq_len):
+        best = None
+        for p in self._positions:
+            if p <= seq_len:
+                best = p
+        return best
+
+    def kv_bytes(self):
+        return self._kv_bytes
+
+    def gdn_bytes(self):
+        return self._gdn_bytes
+
+    def to(self, device):
+        return self

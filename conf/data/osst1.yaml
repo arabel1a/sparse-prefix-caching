@@ -1,12 +1,11 @@
 defaults:
-  - _self_
   - base
+  - _self_
 
-_target_: spase_cache.datasets.osst1.Osst1Dataset
+_target_: spase_cache.datasets.tree_of_thoughts.Osst1Dataset
 name: osst1
 format: revision
 processed: data/osst1_${run_name}.parquet
 min_paths: 2
 max_rows: 1000000
 split: train
-avg_req_len: 500

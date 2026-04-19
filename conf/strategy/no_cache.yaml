@@ -1,5 +1,6 @@
 tag: "no_cache"
 type: "no_cache"
+family_label: "No caching"
 label: "No caching"
 color: "black"
 marker: "o"

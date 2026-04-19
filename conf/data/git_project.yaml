@@ -1,15 +1,14 @@
 defaults:
-  - _self_
   - base
+  - _self_
 
-_target_: spase_cache.datasets.git_project.GitProjectDataset
+_target_: spase_cache.datasets.revisions.GitProjectDataset
 name: git_project
 format: revision
 raw_dir: data/git_project
 processed: data/git_project_${run_name}.parquet
 max_revisions: 1000   # max commits to process
 skip_fetch: false
-avg_req_len: 10000
 
 fetch:
   repo_dir: "."        # repository to snapshot

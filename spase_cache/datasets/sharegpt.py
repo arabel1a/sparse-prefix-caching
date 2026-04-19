@@ -5,6 +5,7 @@ A request corresponds to a user turn: we concatenate all messages up to
 that turn into a single token sequence (simulating growing prefix).
 """
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -27,24 +28,28 @@ class ShareGPTDataset(Dataset):
 
     # -- prepare -------------------------------------------------------------
 
-    def _filter(self, raw_path, max_rounds, max_rows):
-        log.info("Loading %s...", raw_path)
-        df = pl.read_csv(raw_path)
+    def prepare(self, tokenizer) -> None:
+        cfg = self.cfg
+        log.info("Loading %s...", cfg.raw_path)
+        df = pl.read_csv(cfg.raw_path)
         df = df.with_columns(
             pl.col("message_create_time").str.replace("ts:", "").cast(pl.Float64).alias("ts")
         )
         df = df.filter(pl.col("ts").is_not_null())
         df = df.sort(["url", "message_index"])
+
+        # Cap rows early
+        df = df.head(cfg.max_rows)
+
+        # Limit conversations
+        urls = df["url"].unique(maintain_order=True).to_list()[:cfg.max_convs]
+        df = df.filter(pl.col("url").is_in(urls))
+
+        # Limit rounds per conversation
         df = df.with_columns(
             pl.col("message_index").rank("ordinal").over("url").alias("_rank")
-        ).filter(pl.col("_rank") <= max_rounds).drop("_rank")
-        df = df.head(max_rows)
+        ).filter(pl.col("_rank") <= cfg.max_rounds).drop("_rank")
         log.info("Filtered: %d conversations, %d rows", df.n_unique("url"), len(df))
-        return df
-
-    def prepare(self, tokenizer) -> None:
-        cfg = self.cfg
-        df = self._filter(cfg.raw_path, cfg.max_rounds, cfg.max_rows)
 
         # format: '<|role|> text' with \n separator
         df = df.with_columns(
@@ -59,11 +64,10 @@ class ShareGPTDataset(Dataset):
 
         # tokenize in chunks
         log.info("Tokenizing messages...")
-        chunk_size = cfg.get("tokenizer_chunk_size", 2048)
         formatted = df["_formatted"]
         all_tokens = []
-        for i in tqdm(range(0, len(formatted), chunk_size), desc="tokenizing chunks"):
-            chunk_texts = formatted[i:i + chunk_size].to_list()
+        for i in tqdm(range(0, len(formatted), cfg.tokenizer_chunk_size), desc="tokenizing chunks"):
+            chunk_texts = formatted[i:i + cfg.tokenizer_chunk_size].to_list()
             for ids in tokenizer(chunk_texts, add_special_tokens=False)["input_ids"]:
                 all_tokens.append(np.array(ids, dtype=np.int32))
             del chunk_texts
@@ -78,14 +82,11 @@ class ShareGPTDataset(Dataset):
         df = df.filter(pl.col("cum_tokens") <= cfg.max_seq_len)
         log.info("Tokenized %d messages (%d truncated)", len(df), n_before - len(df))
 
-        # drop short conversations
-        min_seq_len = cfg.get("min_seq_len", 0)
-        if min_seq_len > 0:
-            conv_total = df.group_by("url").agg(pl.col("tokens").list.len().sum().alias("total_tokens"))
-            short_convs = conv_total.filter(pl.col("total_tokens") < min_seq_len)["url"]
-            n_before = df.n_unique("url")
-            df = df.filter(~pl.col("url").is_in(short_convs))
-            log.info("Dropped %d conversations shorter than %d tokens", n_before - df.n_unique("url"), min_seq_len)
+        conv_total = df.group_by("url").agg(pl.col("tokens").list.len().sum().alias("total_tokens"))
+        short_convs = conv_total.filter(pl.col("total_tokens") < cfg.min_seq_len)["url"]
+        n_before = df.n_unique("url")
+        df = df.filter(~pl.col("url").is_in(short_convs))
+        log.info("Dropped %d conversations shorter than %d tokens", n_before - df.n_unique("url"), cfg.min_seq_len)
 
         out_path = Path(cfg.processed)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,13 +107,13 @@ class ShareGPTDataset(Dataset):
 
         user_rows = df.filter(pl.col("role") == "user").sort("ts")
         self._requests = []
-        turn_counter = {}
+        turn_counter = defaultdict(int)
         for url, msg_idx in zip(
             user_rows["url"].to_list(), user_rows["message_index"].to_list()
         ):
             n_msgs = conv_msg_indices[url].index(msg_idx) + 1
-            turn = turn_counter.get(url, 0)
-            turn_counter[url] = turn + 1
+            turn = turn_counter[url]
+            turn_counter[url] += 1
             self._requests.append((url, turn, n_msgs))
 
         log.info("Loaded %d requests from %s", len(self._requests), self.cfg.processed)

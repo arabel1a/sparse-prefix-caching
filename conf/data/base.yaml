@@ -1,5 +1,8 @@
 max_seq_len: 16384
 min_seq_len: 1
-interleave: true
-train_frac: 0.8
+interleave: false #true
+train_frac: 0.6
 max_rows: 100000
+max_requests: 10000
+max_convs: 1000
+tokenizer_chunk_size: 2048

@@ -82,9 +82,10 @@ def main(cfg: DictConfig):
         # Measure full no_cache baseline
         input_ids = torch.randint(0, config.vocab_size, (1, N)).to(dev)
         t_full = time_fn(n_runs, dev, prefill_baseline, model, input_ids)
-        times = {"no_cache": t_full}
-        cap_times = {"no_cache": 0.0}
-        bytes_map = {"no_cache": 0}
+        times = {t: 0 for t in all_tags}
+        cap_times = {t: 0.0 for t in all_tags}
+        bytes_map = {t: 0 for t in all_tags}
+        times["no_cache"] = t_full
 
         # Checkpoint strategies: always include KV cache
         for strat in strategies:
@@ -114,15 +115,15 @@ def main(cfg: DictConfig):
             reset_peak_memory()
 
         for t in all_tags:
-            results[t].append(times.get(t, 0))
-            capture_times[t].append(cap_times.get(t, 0.0))
-            cache_sizes[t].append(bytes_map.get(t, 0))
+            results[t].append(times[t])
+            capture_times[t].append(cap_times[t])
+            cache_sizes[t].append(bytes_map[t])
 
         completed_seq_lens.append(N)
 
         parts = [f"N={N:5d}"]
         for t in all_tags:
-            parts.append(f"{t} {times.get(t, 0)*1000:7.1f}ms cap={cap_times.get(t, 0)*1000:5.1f}ms")
+            parts.append(f"{t} {times[t]*1000:7.1f}ms cap={cap_times[t]*1000:5.1f}ms")
         log.info(" | ".join(parts))
         wall_time = time.perf_counter() - wall_t0
         _save_results(out_path, {

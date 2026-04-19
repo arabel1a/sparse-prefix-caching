@@ -1,5 +1,4 @@
 defaults:
-  - data: git_project
   - _self_
 
 run_name: full
@@ -16,21 +15,16 @@ hydra:
     dir: ${output_dir}
   output_subdir: hydra  # saves hydra config into ${output_dir}/hydra/
 
-
-n_blocks_when_kvcache_equals_gdncache: ${eval:'max(int(${data.avg_req_len} // ${model.r}), 2)'}
+strategy_defaults:
+  save_last: False
+  laplace_alpha: 0
+  linestyle: "-"
+  linewidth: 2
+  adaptive_backtrack: False
 
 strategies:
-  - no_cache   # do not delete this strat - code assumes that it is used
-  - kv_only
-  - balanced
-  - balanced: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-  - block: {block_size: "${model.r}"}
-  # - log
-  - hist_frozen
-  - hist_frozen: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
-  - hist_exp_decay
-  - hist_exp_decay: {n_blocks: "${n_blocks_when_kvcache_equals_gdncache}"}
- 
+  no_cache: {}   # do not delete this strat - code assumes that it is used
+
 # Qwen3.5-0.8B dimensions
 model:
   name: "Qwen3.5-0.8B"
@@ -62,11 +56,18 @@ benchmark_baselines:
   seq_lens: [1023, 1024, 1536, 2047, 2048, 3072, 4095, 4096, 6144, 8191, 8192, 16383, 16384, 20000]
   n_runs: 3
 
+cache_manager:
+  _target_: spase_cache.utils.FixedSizeCache
+  max_cached_sequences: 20
+  # _target_: spase_cache.utils.PrefixCache
+  # kv_budget_gb: 5.0
+  # gdn_budget_gb: 5.0
+  # For FixedSizeCache: _target_: spase_cache.utils.FixedSizeCache, max_cached_sequences: 100
+
 benchmark_e2e:
-  kv_budget_gb: 5.0
-  gdn_budget_gb: 5.0
   warmup_seqs: 1000
   progress: true
+  dry_run: false
 
 overlap_distribution:
   batch_size: 5000
@@ -77,3 +78,4 @@ prepare_data:
 
 plot_results:
   _target_: plot_results.plot_all  # or plot_results.plot_single, plot_results.plot_tradeoff, plot_results.plot_e2e, plot_results.plot_overlap
+  reference_lines: False

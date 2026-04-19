@@ -1,0 +1,47 @@
+defaults:
+  - config
+  - data: quality
+  - _self_
+
+run_name: clean
+ 
+data:
+  interleave: True
+  max_seq_len: 16384
+  max_rows: 1000
+
+strategies:
+  no_cache: {}
+  log: {}
+  sqrt: {}
+  block_64: {_base_: block, block_size: 64}
+  dp_300: {_base_: hist_exp_decay, n_blocks: 300}
+  balanced_300: {_base_: balanced, n_blocks: 300}
+  # Block
+  block_192: {_base_: block, block_size: 192}
+  block_256: {_base_: block, block_size: 256}
+  block_512: {_base_: block, block_size: 512}
+  block_1024: {_base_: block, block_size: 1024}
+  block_2048: {_base_: block, block_size: 2048}
+  block_4096: {_base_: block, block_size: 4096}
+  # Balanced
+  balanced_1:  {_base_: balanced, n_blocks: 1}
+  balanced_2:  {_base_: balanced, n_blocks: 2}
+  balanced_3:  {_base_: balanced, n_blocks: 3}
+  balanced_5:  {_base_: balanced, n_blocks: 5}
+  balanced_12: {_base_: balanced, n_blocks: 12}
+  balanced_20: {_base_: balanced, n_blocks: 20}
+  balanced_30: {_base_: balanced, n_blocks: 30}
+  # DP-optimal
+  dp_1:  {_base_: hist_exp_decay, n_blocks: 1}
+  dp_2:  {_base_: hist_exp_decay, n_blocks: 2}
+  dp_3:  {_base_: hist_exp_decay, n_blocks: 3}
+  dp_5:  {_base_: hist_exp_decay, n_blocks: 5}
+  dp_8:  {_base_: hist_exp_decay, n_blocks: 8}
+  dp_12: {_base_: hist_exp_decay, n_blocks: 12}
+  dp_25: {_base_: hist_exp_decay, n_blocks: 20}
+  dp_30: {_base_: hist_exp_decay, n_blocks: 30}
+
+plot_results:
+ _target_: plot_results.plot_all
+ break_at: 35
