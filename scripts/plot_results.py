@@ -1172,7 +1172,7 @@ def plot_cache_breakdown(out_dir, root_dir=None, style_map=None, **_kw):
 # ---------------------------------------------------------------------------
 def plot_histograms(out_dir, root_dir=None, style_map=None, **_kw):
     """Plot raw vs Laplace-smoothed histograms from histogram strategy solves."""
-    from spase_cache.strategies import laplace_smoothing
+    from sparse_prefix_caching.strategies import laplace_smoothing
 
     out_dir = Path(out_dir)
     root_dir = Path(root_dir) if root_dir else out_dir
@@ -1731,7 +1731,7 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
 # ---------------------------------------------------------------------------
 @hydra.main(config_path="../conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    from spase_cache.utils import setup_output_dir, resolve_strategies
+    from sparse_prefix_caching.utils import setup_output_dir, resolve_strategies
     root_dir = Path(cfg.output_dir)
     out_dir = setup_output_dir(cfg, "plot_results")
     resolve_strategies(cfg)

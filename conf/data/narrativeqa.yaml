@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.single_doc_qa.MuLDDataset
+_target_: sparse_prefix_caching.datasets.single_doc_qa.MuLDDataset
 name: narrativeqa
 format: revision
 processed: data/narrativeqa_${run_name}.parquet

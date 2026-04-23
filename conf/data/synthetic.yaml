@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.synthetic.SyntheticDataset
+_target_: sparse_prefix_caching.datasets.synthetic.SyntheticDataset
 name: synthetic
 format: synthetic
 interleave: false

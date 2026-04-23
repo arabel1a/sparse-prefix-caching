@@ -1,0 +1,26 @@
+services:
+  # This service tags the intermediate torch image
+  sparse-caching-base:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA_VERSION: "13.0.0"
+        CUDA_PIP: "cu130"
+      network: host
+    image: torch:latest
+    container_name: sparse-prefix-caching
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./:/home/sparse_caching
+    stdin_open: true # -i
+    tty: true        # -t
+    working_dir: /home/sparse_caching
+    entrypoint: /bin/bash
+

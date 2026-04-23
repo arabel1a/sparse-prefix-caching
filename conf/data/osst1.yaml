@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.tree_of_thoughts.Osst1Dataset
+_target_: sparse_prefix_caching.datasets.tree_of_thoughts.Osst1Dataset
 name: osst1
 format: revision
 processed: data/osst1_${run_name}.parquet

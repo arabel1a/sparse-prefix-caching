@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.system_prompts.LeakedPromptsDataset
+_target_: sparse_prefix_caching.datasets.system_prompts.LeakedPromptsDataset
 name: system_prompts
 format: system_prompt
 processed: data/system_prompts_${run_name}.parquet

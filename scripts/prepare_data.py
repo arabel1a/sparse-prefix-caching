@@ -15,8 +15,8 @@ from omegaconf import DictConfig
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
-from spase_cache.datasets.base import Dataset
-from spase_cache.utils import setup_output_dir
+from sparse_prefix_caching.datasets.base import Dataset
+from sparse_prefix_caching.utils import setup_output_dir
 
 log = logging.getLogger(__name__)
 

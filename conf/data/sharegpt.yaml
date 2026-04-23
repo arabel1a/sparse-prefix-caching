@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.sharegpt.ShareGPTDataset
+_target_: sparse_prefix_caching.datasets.sharegpt.ShareGPTDataset
 name: sharegpt
 format: conversation
 raw_path: data/chatgpt_results_final_language_filtered.csv

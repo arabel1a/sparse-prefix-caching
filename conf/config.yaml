@@ -57,12 +57,12 @@ benchmark_baselines:
   n_runs: 3
 
 cache_manager:
-  _target_: spase_cache.utils.FixedSizeCache
+  _target_: sparse_prefix_caching.utils.FixedSizeCache
   max_cached_sequences: 20
-  # _target_: spase_cache.utils.PrefixCache
+  # _target_: sparse_prefix_caching.utils.PrefixCache
   # kv_budget_gb: 5.0
   # gdn_budget_gb: 5.0
-  # For FixedSizeCache: _target_: spase_cache.utils.FixedSizeCache, max_cached_sequences: 100
+  # For FixedSizeCache: _target_: sparse_prefix_caching.utils.FixedSizeCache, max_cached_sequences: 100
 
 benchmark_e2e:
   warmup_seqs: 1000

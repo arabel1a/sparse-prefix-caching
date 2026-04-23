@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.revisions.GitHubDataset
+_target_: sparse_prefix_caching.datasets.revisions.GitHubDataset
 name: github
 format: revision
 raw_dir: data/github

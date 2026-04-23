@@ -3,7 +3,7 @@
 All checkpoint strategies store both GDN recurrent states and attention KV cache.
 Results saved to baselines_results.json.
 """
-import spase_cache
+import sparse_prefix_cacing
 import json
 import logging
 import time
@@ -12,10 +12,10 @@ import torch
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from spase_cache.checkpoint_cache import (
+from sparse_prefix_caching.checkpoint_cache import (
     prefill_from_checkpoint,
 )
-from spase_cache.utils import (
+from sparse_prefix_caching.utils import (
     setup_output_dir,
     resolve_strategies,
     make_model,
@@ -29,7 +29,7 @@ from spase_cache.utils import (
     time_fn,
     warmup,
 )
-from spase_cache.strategies import checkpoint_positions
+from sparse_prefix_caching.strategies import checkpoint_positions
 
 log = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from omegaconf import DictConfig
 
-from spase_cache.utils import interleave as _interleave
+from sparse_prefix_caching.utils import interleave as _interleave
 
 log = logging.getLogger(__name__)
 

@@ -15,7 +15,7 @@ benchmark_baselines:
   seq_lens: [128, 256, 512, 1024]
 
 cache_manager:
-  _target_: spase_cache.utils.FixedSizeCache
+  _target_: sparse_prefix_caching.utils.FixedSizeCache
   max_cached_sequences: 1
   kv_budget_gb: 0.2
   gdn_budget_gb: 0.2

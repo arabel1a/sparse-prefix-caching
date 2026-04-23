@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.agentic.SweAgentDataset
+_target_: sparse_prefix_caching.datasets.agentic.SweAgentDataset
 name: swe_agent
 format: revision
 processed: data/swe_agent_${run_name}.parquet

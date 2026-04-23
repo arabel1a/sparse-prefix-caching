@@ -1,9 +1,9 @@
 [project]
-name = "spase-cache"
+name = "sparse_prefix_caching"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<=3.12"
 dependencies = [
     "datasets>=4.8.3",
     "fitter",
@@ -11,8 +11,8 @@ dependencies = [
     "matplotlib",
     "numpy>=2.2.6",
     "polars",
-    "torch",
-    "transformers>=5.3.0",
+    "torch==2.11",
+    "transformers==5.3.0",
 ]
 
 [build-system]

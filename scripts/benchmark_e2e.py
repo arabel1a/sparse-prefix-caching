@@ -3,7 +3,7 @@
 Runs checkpoint placement strategies with FIFO prefix cache.
 All checkpoint strategies store both GDN recurrent states and attention KV.
 """
-import spase_cache
+import sparse_prefix_caching
 import json
 import logging
 import time
@@ -15,11 +15,11 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from tqdm.auto import tqdm
 
-from spase_cache.checkpoint_cache import (
+from sparse_prefix_caching.checkpoint_cache import (
     prefill_from_checkpoint,
 )
-from spase_cache.datasets.base import Dataset
-from spase_cache.utils import (
+from sparse_prefix_caching.datasets.base import Dataset
+from sparse_prefix_caching.utils import (
     setup_output_dir,
     resolve_strategies,
     make_model,
@@ -35,7 +35,7 @@ from spase_cache.utils import (
     DryRunStore,
     _save_jsonl,
 )
-from spase_cache.strategies import checkpoint_positions, HistogramTracker
+from sparse_prefix_caching.strategies import checkpoint_positions, HistogramTracker
 
 log = logging.getLogger(__name__)
 

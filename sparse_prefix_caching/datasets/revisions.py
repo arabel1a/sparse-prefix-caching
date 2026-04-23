@@ -22,7 +22,7 @@ import yaml
 from omegaconf import DictConfig
 from tqdm.auto import tqdm
 
-from spase_cache.datasets.base import Dataset
+from sparse_prefix_caching.datasets.base import Dataset
 
 log = logging.getLogger(__name__)
 

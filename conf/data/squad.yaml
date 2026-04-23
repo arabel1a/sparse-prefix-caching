@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.single_doc_qa.SquadDataset
+_target_: sparse_prefix_caching.datasets.single_doc_qa.SquadDataset
 name: squad
 format: revision
 processed: data/squad_${run_name}.parquet

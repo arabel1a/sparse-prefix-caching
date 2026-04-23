@@ -21,7 +21,7 @@ OmegaConf.register_new_resolver("eval", eval, use_cache=True)
 from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5TextConfig
 from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5DynamicCache, Qwen3_5TextModel
 
-from spase_cache.checkpoint_cache import (
+from sparse_prefix_caching.checkpoint_cache import (
     PrefixCheckpointStore,
     RecurrentCheckpoint,
 )

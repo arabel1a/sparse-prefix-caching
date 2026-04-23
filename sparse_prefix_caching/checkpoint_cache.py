@@ -109,7 +109,7 @@ def prefill_from_checkpoint(
         KV cache and GDN checkpoints beyond this point are stale (computed for
         different tokens) and must not be used.
     """
-    from spase_cache.utils import _model_device, _get_linear_layers, _get_attention_layers, prefill_baseline, chunked_prefill
+    from sparse_prefix_caching.utils import _model_device, _get_linear_layers, _get_attention_layers, prefill_baseline, chunked_prefill
 
     device = _model_device(model)
     input_ids = input_ids.to(device)
@@ -172,8 +172,8 @@ def prefill_from_checkpoint(
 # Correctness test - differences in attention outputs
 # ---------------------------------------------------------------------------
 def test_correctness(cfg):
-    from spase_cache.utils import make_model, prefill_baseline, _get_linear_layers, _get_attention_layers, prefill_and_capture_at
-    from spase_cache.strategies import checkpoint_positions
+    from sparse_prefix_caching.utils import make_model, prefill_baseline, _get_linear_layers, _get_attention_layers, prefill_and_capture_at
+    from sparse_prefix_caching.strategies import checkpoint_positions
 
     print("=" * 60)
     print("CORRECTNESS TEST")

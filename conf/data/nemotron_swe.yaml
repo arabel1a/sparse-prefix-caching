@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-_target_: spase_cache.datasets.agentic.NemotronSweDataset
+_target_: sparse_prefix_caching.datasets.agentic.NemotronSweDataset
 name: nemotron_swe
 format: revision
 processed: data/nemotron_swe_${run_name}.parquet

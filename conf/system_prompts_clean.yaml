@@ -55,6 +55,6 @@ plot_results:
  break_at: 25
 
 cache_manager:
-  _target_: spase_cache.utils.FixedSizeCache
+  _target_: sparse_prefix_caching.utils.FixedSizeCache
   max_cached_sequences: 50
 
