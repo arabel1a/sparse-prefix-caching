@@ -65,3 +65,17 @@ capture on. All must match within tolerance. Also validates captured state shape
 Result: `python scripts/test_capture_correctness.py -cn quality_clean device=cuda`
 passes inside the sparse-prefix-caching container. Max diff between vanilla and
 captured forward = 5.76e-4 (under the 1e-3 tolerance).
+
+### 2026-04-24: Fix conv1d mismatch in _patched_gdn_forward
+
+Test failed at longer seq_len (1.99e-3 at seq=512). Root cause: vanilla
+`Qwen3_5GatedDeltaNet.forward` uses `self.causal_conv1d_fn` (Mamba's fused CUDA
+kernel) when available, but the patched non-continuation branch in
+`_patched_gdn_forward` was hardcoded to `F.silu(self.conv1d(...))`. The two are
+numerically distinct; per-token conv differences fed the recurrence and grew
+with T (linear-ish: 5.76e-4 @ 100 → 1.99e-3 @ 512). Confirmed
+`causal_conv1d_fn` is installed inside the container.
+
+Fix: mirror vanilla's branch in `patches.py` — call `self.causal_conv1d_fn` on
+the non-continuation path, fall back to `F.silu(self.conv1d(...))` only when
+it's unavailable. After fix, max_diff = 0.00e+00 at seq=512 and seq=2048.

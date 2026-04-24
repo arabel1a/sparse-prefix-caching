@@ -147,7 +147,16 @@ def _patched_gdn_forward(
             if cache_params is not None:
                 # Save last K pre-activation values as conv state
                 cache_params.conv_states[self.layer_idx] = F.pad(mixed_qkv, (K - mixed_qkv.shape[-1], 0))
-            mixed_qkv = F.silu(self.conv1d(mixed_qkv)[:, :, :seq_len])
+            if self.causal_conv1d_fn is not None:
+                mixed_qkv = self.causal_conv1d_fn(
+                    x=mixed_qkv,
+                    weight=self.conv1d.weight.squeeze(1),
+                    bias=self.conv1d.bias,
+                    activation=self.activation,
+                    seq_idx=None,
+                )
+            else:
+                mixed_qkv = F.silu(self.conv1d(mixed_qkv)[:, :, :seq_len])
 
     mixed_qkv = mixed_qkv.transpose(1, 2)
     query, key, value = torch.split(
