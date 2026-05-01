@@ -218,7 +218,6 @@ def simulate(model, dataset, requests, vocab_size, strategy,
         all_toks = dataset.get_tokens(req)
         input_ids = torch.tensor([all_toks], dtype=torch.long) % vocab_size
         seq_len = input_ids.shape[1]
-
         hit = False
         tokens_saved = 0
         cached_store = None
@@ -226,25 +225,44 @@ def simulate(model, dataset, requests, vocab_size, strategy,
         reusable_kv = 0
         reusable_gdn = 0
 
+        _sync_device(dev)
+        t0 = time.perf_counter()
+        
         if uses_cache:
             cached_store, match_len = cache.find_best_prefix(conv_id, input_ids[0])
+        t1 = time.perf_counter()
         input_ids = input_ids.to(dev)
-
+        t2 = time.perf_counter()
+        
         if online_hist and histogram_tracker is not None:
             histogram_tracker.observe(match_len)
+
+        t3 = time.perf_counter()
 
         positions = (checkpoint_positions(seq_len, histogram_tracker=histogram_tracker, **strategy)
                      if uses_cache else [])
 
-        _sync_device(dev)
-        t0 = time.perf_counter()
+        t4 = time.perf_counter()
+        
         with capture_gdn_states(positions) as captured:
+            t5 = time.perf_counter()
             if cached_store is not None:
                 _, model_cache = prefill_from_checkpoint(model, input_ids, cached_store, match_len=match_len)
             else:
                 _, model_cache = prefill_baseline(model, input_ids)
+            t6 = time.perf_counter()
         _sync_device(dev)
-        dt = time.perf_counter() - t0
+        t7 = time.perf_counter()
+        if uses_cache:
+            store = build_store_from_captures(
+                captured, input_ids, positions, model_cache, config,
+                existing_store=cached_store,
+            )
+        t8 = time.perf_counter()
+        if uses_cache:
+            store.to("cpu")
+            cache.put(conv_id, store)
+        t9 = time.perf_counter()
 
         if cached_store is not None:
             hit = True
@@ -254,23 +272,26 @@ def simulate(model, dataset, requests, vocab_size, strategy,
             if ckpt:
                 tokens_saved = ckpt.position
                 reusable_gdn = ckpt.position
-
-        capture_s = 0.0
-        if uses_cache:
-            store = build_store_from_captures(
-                captured, input_ids, positions, model_cache, config,
-                existing_store=cached_store,
-            )
-            store.to("cpu")
-            cache.put(conv_id, store)
-        _sync_device(dev)
-
+ 
         per_request.append({
-            "conv_id": str(conv_id), "seq_len": seq_len,
+            "conv_id": str(conv_id), 
+            "seq_len": seq_len,
             "added_positions": positions,
-            "time_s": dt, "capture_s": capture_s, "hit": hit,
+            "time_s": t9 - t4 + t3 - t0, # exclude histogram re-solving
+            "find_best_prefix_s": t1 - t0,
+            "ids_to_device_s": t2 - t1,
+            "hist_observe_s": t3 - t2,
+            "calculate_positions_s": t4 - t3,
+            "context_creation_s": t5 - t4,
+            "prefill_s": t6 - t5,
+            "prefill_and_sync_s": t7 - t5,
+            "build_store_s": t8 - t7,
+            "put_store_s": t9 - t8,
+            "capture_s": t9-t7, 
+            "hit": hit,
             "tokens_saved": tokens_saved,
-            "reusable_kv": reusable_kv, "reusable_gdn": reusable_gdn,
+            "reusable_kv": reusable_kv, 
+            "reusable_gdn": reusable_gdn,
             "prefix_match": match_len,
             "n_cache_entries": cache.n_entries,
             "cache_kv_bytes": cache.kv_used,

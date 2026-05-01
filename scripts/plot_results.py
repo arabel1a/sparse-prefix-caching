@@ -1298,9 +1298,15 @@ def plot_tokens_vs_time(out_dir, root_dir=None, style_map=None, **_kw):
         # Misses: small grey dots
         if misses:
             miss_label = "miss" if "miss" not in seen_families else None
+            tokens_processed = [e["seq_len"] - e["tokens_saved"] for e in misses]
+            time_per_token = [
+                e["time_s"] / (e["seq_len"] - e["tokens_saved"]) for e in misses
+            ]
+            time = [e["time_s"] for e in misses]
+
             seen_families.add("miss")
-            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in misses],
-                       [e["time_s"] for e in misses],
+            ax.scatter(tokens_processed,
+                       time, # time_per_token,
                        color="grey", marker=".", s=15, alpha=0.4,
                        label=miss_label, zorder=2)
 
@@ -1311,12 +1317,17 @@ def plot_tokens_vs_time(out_dir, root_dir=None, style_map=None, **_kw):
             match_lens = [e["prefix_match"] for e in hits]
             max_match = max(max_match_global, 1)
             sizes = [10 + 120 * (m / max_match) for m in match_lens]
-            ax.scatter([e["seq_len"] - e["tokens_saved"] for e in hits],
-                       [e["time_s"] for e in hits],
+            tokens_processed = [e["seq_len"] - e["tokens_saved"] for e in hits]
+            time_per_token = [
+                    e["time_s"] / (e["seq_len"] - e["tokens_saved"]) for e in hits]
+            time = [e["time_s"] for e in hits]
+            ax.scatter(tokens_processed,
+                       time, # time_per_token,
                        color=color, marker=marker, s=sizes, alpha=0.6,
                        label=label, zorder=3)
 
     ax.set_xlabel("Tokens to process (seq_len − tokens_saved)")
+    # ax.set_ylabel("Wall-clock time (s) per token")
     ax.set_ylabel("Wall-clock time (s)")
     ax.set_title(f"Tokens to process vs wall-clock time — {model_name}")
     ax.legend(fontsize=9)
@@ -1686,6 +1697,13 @@ def plot_pareto(out_dir, root_dir=None, style_map=None, reference_lines=False, *
         ax5.plot([p[1] for p in points], [p[6] for p in points],
                  color=color, marker=marker, ls=ls, lw=lw,
                  markersize=8, label=fam, zorder=3)
+    # horizontal baseline: no_cache total time
+    no_cache_tag = next((t for t, s in sidx.items() if s["type"] == "no_cache"), None)
+    if no_cache_tag is not None:
+        _, _, _, _, no_cache_total_time = _load_jsonl_stats(data_dir, no_cache_tag)
+        if no_cache_total_time > 0:
+            ax5.axhline(no_cache_total_time, color="gray", ls="--", lw=1.5,
+                        label="no cache", zorder=2)
     ax5.set_xlabel("Avg number of GDN checkpoints")
     ax5.set_ylabel("Total processing time (s)")
     ax5.set_title(f"Pareto front: total time vs checkpoint budget — {model_name}")
@@ -1717,12 +1735,12 @@ def plot_all(out_dir, root_dir=None, style_map=None, **_kw):
     plot_tradeoff(out_dir, root_dir=root_dir, style_map=style_map)
     plot_e2e(out_dir, root_dir=root_dir, style_map=style_map)
     plot_overlap(out_dir, root_dir=root_dir)
-    plot_trie_diagnostics(out_dir, root_dir=root_dir, style_map=style_map)
+    # plot_trie_diagnostics(out_dir, root_dir=root_dir, style_map=style_map)
     plot_lcp_over_rounds(out_dir, root_dir=root_dir, style_map=style_map)
     plot_checkpoint_positions(out_dir, root_dir=root_dir, style_map=style_map)
     plot_gdn_gap(out_dir, root_dir=root_dir, style_map=style_map)
     plot_cache_breakdown(out_dir, root_dir=root_dir, style_map=style_map)
-    plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
+    # plot_histograms(out_dir, root_dir=root_dir, style_map=style_map)
     plot_tokens_vs_time(out_dir, root_dir=root_dir, style_map=style_map)
     plot_pareto(out_dir, root_dir=root_dir, style_map=style_map, **_kw)
 
